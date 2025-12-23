@@ -1,0 +1,1565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Personal Trainer - Complete Wireframes</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.5;
+    }
+    
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    
+    header {
+      text-align: center;
+      margin-bottom: 50px;
+    }
+    
+    header h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 8px;
+    }
+    
+    header p {
+      font-size: 16px;
+      color: #666;
+    }
+    
+    .wireframe-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 32px;
+      justify-items: center;
+    }
+    
+    .wireframe-section {
+      width: 100%;
+      max-width: 380px;
+    }
+    
+    .wireframe-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .wireframe-title .screen-num {
+      background: #2563eb;
+      color: white;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+    }
+    
+    .phone-frame {
+      background: #1a1a1a;
+      border-radius: 36px;
+      padding: 10px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    }
+    
+    .phone-screen {
+      background: #ffffff;
+      border-radius: 28px;
+      overflow: hidden;
+      height: 680px;
+      position: relative;
+    }
+    
+    .status-bar {
+      height: 44px;
+      background: #fafafa;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 24px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    
+    .status-bar .time {
+      color: #1a1a1a;
+    }
+    
+    .status-bar .icons {
+      display: flex;
+      gap: 6px;
+    }
+    
+    .status-bar .icon {
+      width: 18px;
+      height: 12px;
+      background: #1a1a1a;
+      border-radius: 2px;
+    }
+    
+    .screen-content {
+      padding: 20px;
+      height: calc(100% - 44px - 76px);
+      overflow-y: auto;
+    }
+    
+    .nav-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 76px;
+      background: #fafafa;
+      border-top: 1px solid #e5e5e5;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding-bottom: 8px;
+    }
+    
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      color: #999;
+      font-size: 11px;
+    }
+    
+    .nav-item.active {
+      color: #2563eb;
+    }
+    
+    .nav-item .nav-icon {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    
+    /* Home Screen Styles */
+    .greeting {
+      margin-bottom: 20px;
+    }
+    
+    .greeting .welcome {
+      font-size: 15px;
+      color: #666;
+    }
+    
+    .greeting .name {
+      font-size: 26px;
+      font-weight: 700;
+      color: #1a1a1a;
+    }
+    
+    .today-card {
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      border-radius: 18px;
+      padding: 20px;
+      color: white;
+      margin-bottom: 20px;
+    }
+    
+    .today-card .label {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-bottom: 4px;
+      letter-spacing: 0.5px;
+    }
+    
+    .today-card .workout-name {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    
+    .today-card .meta {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    
+    .today-card .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      opacity: 0.9;
+    }
+    
+    .start-btn {
+      width: 100%;
+      background: white;
+      color: #2563eb;
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    
+    .section-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 14px;
+    }
+    
+    .streak-card {
+      background: #f8fafc;
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    
+    .streak-icon {
+      width: 44px;
+      height: 44px;
+      background: #fef3c7;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+    
+    .streak-info .number {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a1a;
+    }
+    
+    .streak-info .label {
+      font-size: 13px;
+      color: #666;
+    }
+    
+    .week-view {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    
+    .day {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .day .day-name {
+      font-size: 11px;
+      color: #999;
+      font-weight: 600;
+    }
+    
+    .day .day-circle {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #64748b;
+    }
+    
+    .day .day-circle.completed {
+      background: #dcfce7;
+      color: #16a34a;
+    }
+    
+    .day .day-circle.today {
+      background: #2563eb;
+      color: white;
+    }
+    
+    .day .day-circle.rest {
+      background: #fef3c7;
+      color: #d97706;
+    }
+    
+    /* Active Workout Styles */
+    .workout-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    
+    .workout-header .back {
+      font-size: 22px;
+      color: #666;
+    }
+    
+    .workout-header .title {
+      font-size: 17px;
+      font-weight: 700;
+    }
+    
+    .workout-header .more {
+      font-size: 22px;
+      color: #666;
+    }
+    
+    .progress-bar {
+      height: 6px;
+      background: #e5e7eb;
+      border-radius: 3px;
+      margin-bottom: 6px;
+      overflow: hidden;
+    }
+    
+    .progress-bar .fill {
+      height: 100%;
+      background: #2563eb;
+      border-radius: 3px;
+      width: 40%;
+    }
+    
+    .progress-text {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 18px;
+    }
+    
+    .current-exercise {
+      background: #f0f9ff;
+      border: 2px solid #2563eb;
+      border-radius: 18px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    
+    .current-exercise .exercise-name {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 6px;
+    }
+    
+    .current-exercise .exercise-target {
+      font-size: 15px;
+      color: #2563eb;
+      margin-bottom: 16px;
+    }
+    
+    .input-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    
+    .input-group {
+      flex: 1;
+    }
+    
+    .input-group label {
+      display: block;
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 6px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    
+    .stepper {
+      display: flex;
+      align-items: center;
+      background: white;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #e5e7eb;
+    }
+    
+    .stepper button {
+      width: 44px;
+      height: 44px;
+      border: none;
+      background: #f8fafc;
+      font-size: 22px;
+      color: #2563eb;
+      cursor: pointer;
+    }
+    
+    .stepper .value {
+      flex: 1;
+      text-align: center;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    
+    .weight-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    
+    .weight-chip {
+      padding: 10px 14px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    
+    .weight-chip.selected {
+      background: #2563eb;
+      color: white;
+      border-color: #2563eb;
+    }
+    
+    .complete-set-btn {
+      width: 100%;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 6px;
+    }
+    
+    .exercise-list {
+      margin-top: 16px;
+    }
+    
+    .exercise-item {
+      display: flex;
+      align-items: center;
+      padding: 14px;
+      background: #f8fafc;
+      border-radius: 10px;
+      margin-bottom: 6px;
+      gap: 10px;
+    }
+    
+    .exercise-item.completed {
+      background: #f0fdf4;
+    }
+    
+    .exercise-item .check {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: 2px solid #d1d5db;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+    
+    .exercise-item.completed .check {
+      background: #16a34a;
+      border-color: #16a34a;
+      color: white;
+    }
+    
+    .exercise-item .info {
+      flex: 1;
+    }
+    
+    .exercise-item .name {
+      font-size: 15px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+    
+    .exercise-item .sets {
+      font-size: 13px;
+      color: #666;
+    }
+    
+    /* AI Coach Styles */
+    .chat-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #e5e7eb;
+      margin-bottom: 16px;
+    }
+    
+    .chat-header .avatar {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    
+    .chat-header .info .name {
+      font-size: 17px;
+      font-weight: 700;
+    }
+    
+    .chat-header .info .status {
+      font-size: 13px;
+      color: #16a34a;
+    }
+    
+    .chat-messages {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    
+    .message {
+      max-width: 85%;
+      padding: 14px;
+      border-radius: 14px;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    
+    .message.ai {
+      background: #f1f5f9;
+      color: #1a1a1a;
+      align-self: flex-start;
+      border-bottom-left-radius: 4px;
+    }
+    
+    .message.user {
+      background: #2563eb;
+      color: white;
+      align-self: flex-end;
+      border-bottom-right-radius: 4px;
+    }
+    
+    .quick-actions {
+      margin-bottom: 16px;
+    }
+    
+    .quick-actions .label {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 10px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    
+    .quick-btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    
+    .quick-btn {
+      padding: 10px 14px;
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 18px;
+      font-size: 13px;
+      color: #374151;
+      cursor: pointer;
+    }
+    
+    .chat-input {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: #f8fafc;
+      border-radius: 14px;
+      padding: 6px 6px 6px 16px;
+    }
+    
+    .chat-input input {
+      flex: 1;
+      border: none;
+      background: none;
+      font-size: 15px;
+      outline: none;
+    }
+    
+    .chat-input .send-btn {
+      width: 44px;
+      height: 44px;
+      background: #2563eb;
+      border: none;
+      border-radius: 10px;
+      color: white;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    
+    /* History Screen Styles */
+    .history-header {
+      margin-bottom: 20px;
+    }
+    
+    .history-header h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 4px;
+    }
+    
+    .history-header p {
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .calendar-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    
+    .calendar-nav .month {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a1a1a;
+    }
+    
+    .calendar-nav .arrows {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .calendar-nav .arrow {
+      width: 36px;
+      height: 36px;
+      background: #f1f5f9;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      color: #64748b;
+      cursor: pointer;
+    }
+    
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      margin-bottom: 20px;
+    }
+    
+    .calendar-grid .day-header {
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: #999;
+      padding: 8px 0;
+    }
+    
+    .calendar-grid .day-cell {
+      aspect-ratio: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 500;
+      color: #64748b;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    
+    .calendar-grid .day-cell.empty {
+      color: transparent;
+    }
+    
+    .calendar-grid .day-cell.workout {
+      background: #dcfce7;
+      color: #16a34a;
+      font-weight: 600;
+    }
+    
+    .calendar-grid .day-cell.selected {
+      background: #2563eb;
+      color: white;
+      font-weight: 700;
+    }
+    
+    .calendar-grid .day-cell.today {
+      border: 2px solid #2563eb;
+    }
+    
+    .history-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .stat-card {
+      background: #f8fafc;
+      border-radius: 12px;
+      padding: 14px;
+      text-align: center;
+    }
+    
+    .stat-card .value {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a1a;
+    }
+    
+    .stat-card .label {
+      font-size: 11px;
+      color: #666;
+      margin-top: 2px;
+    }
+    
+    .recent-workout {
+      background: #f8fafc;
+      border-radius: 14px;
+      padding: 16px;
+    }
+    
+    .recent-workout .date {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+    }
+    
+    .recent-workout .name {
+      font-size: 17px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 10px;
+    }
+    
+    .recent-workout .details {
+      display: flex;
+      gap: 16px;
+    }
+    
+    .recent-workout .detail {
+      font-size: 13px;
+      color: #64748b;
+    }
+    
+    .recent-workout .detail span {
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+    
+    /* Profile Screen Styles */
+    .profile-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    
+    .profile-avatar {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 12px;
+      font-size: 32px;
+      color: white;
+      font-weight: 700;
+    }
+    
+    .profile-header .name {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 2px;
+    }
+    
+    .profile-header .joined {
+      font-size: 13px;
+      color: #666;
+    }
+    
+    .profile-section {
+      margin-bottom: 20px;
+    }
+    
+    .profile-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #999;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+    
+    .profile-card {
+      background: #f8fafc;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    
+    .profile-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .profile-row:last-child {
+      border-bottom: none;
+    }
+    
+    .profile-row .label {
+      font-size: 15px;
+      color: #1a1a1a;
+    }
+    
+    .profile-row .value {
+      font-size: 15px;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .profile-row .arrow {
+      color: #cbd5e1;
+    }
+    
+    .goal-tag {
+      display: inline-block;
+      background: #dbeafe;
+      color: #2563eb;
+      padding: 6px 12px;
+      border-radius: 16px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    
+    .limitation-tag {
+      display: inline-block;
+      background: #fef3c7;
+      color: #d97706;
+      padding: 6px 12px;
+      border-radius: 16px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    
+    .edit-btn {
+      width: 100%;
+      background: white;
+      color: #2563eb;
+      border: 2px solid #2563eb;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    
+    .logout-btn {
+      width: 100%;
+      background: #fef2f2;
+      color: #dc2626;
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+
+    /* Annotations */
+    .annotations {
+      margin-top: 16px;
+      padding: 14px;
+      background: #fefce8;
+      border-radius: 10px;
+      border: 1px solid #fef08a;
+    }
+    
+    .annotations h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #854d0e;
+      margin-bottom: 10px;
+    }
+    
+    .annotations ul {
+      list-style: none;
+      font-size: 12px;
+      color: #713f12;
+    }
+    
+    .annotations li {
+      margin-bottom: 6px;
+      padding-left: 14px;
+      position: relative;
+    }
+    
+    .annotations li::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+    }
+    
+    /* Legend */
+    .legend {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      margin-top: 50px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .legend h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      color: #1a1a1a;
+    }
+    
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    
+    .legend-item {
+      display: flex;
+      gap: 12px;
+    }
+    
+    .legend-item .icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 18px;
+    }
+    
+    .legend-item .icon.blue { background: #dbeafe; color: #2563eb; }
+    .legend-item .icon.green { background: #dcfce7; color: #16a34a; }
+    .legend-item .icon.purple { background: #f3e8ff; color: #7c3aed; }
+    .legend-item .icon.orange { background: #ffedd5; color: #ea580c; }
+    
+    .legend-item .text h4 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 4px;
+    }
+    
+    .legend-item .text p {
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>AI Personal Trainer — Complete Wireframes</h1>
+      <p>All 5 core screens designed for users 40+ with accessibility and simplicity in mind</p>
+    </header>
+    
+    <div class="wireframe-grid">
+      <!-- Screen 1: Home -->
+      <div class="wireframe-section">
+        <div class="wireframe-title">
+          <span class="screen-num">1</span>
+          Home / Dashboard
+        </div>
+        <div class="phone-frame">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span class="time">9:41</span>
+              <div class="icons">
+                <span class="icon"></span>
+                <span class="icon"></span>
+                <span class="icon"></span>
+              </div>
+            </div>
+            
+            <div class="screen-content">
+              <div class="greeting">
+                <div class="welcome">Good morning,</div>
+                <div class="name">Michael 👋</div>
+              </div>
+              
+              <div class="today-card">
+                <div class="label">TODAY'S WORKOUT</div>
+                <div class="workout-name">Upper Body Strength</div>
+                <div class="meta">
+                  <div class="meta-item">
+                    <span>🏋️ 6 exercises</span>
+                  </div>
+                  <div class="meta-item">
+                    <span>⏱️ ~45 min</span>
+                  </div>
+                </div>
+                <button class="start-btn">Start Workout</button>
+              </div>
+              
+              <div class="streak-card">
+                <div class="streak-icon">🔥</div>
+                <div class="streak-info">
+                  <div class="number">12 days</div>
+                  <div class="label">Current streak</div>
+                </div>
+              </div>
+              
+              <div class="section-title">This Week</div>
+              <div class="week-view">
+                <div class="day">
+                  <span class="day-name">Mon</span>
+                  <span class="day-circle completed">✓</span>
+                </div>
+                <div class="day">
+                  <span class="day-name">Tue</span>
+                  <span class="day-circle completed">✓</span>
+                </div>
+                <div class="day">
+                  <span class="day-name">Wed</span>
+                  <span class="day-circle rest">R</span>
+                </div>
+                <div class="day">
+                  <span class="day-name">Thu</span>
+                  <span class="day-circle today">19</span>
+                </div>
+                <div class="day">
+                  <span class="day-name">Fri</span>
+                  <span class="day-circle">20</span>
+                </div>
+                <div class="day">
+                  <span class="day-name">Sat</span>
+                  <span class="day-circle">21</span>
+                </div>
+                <div class="day">
+                  <span class="day-name">Sun</span>
+                  <span class="day-circle rest">R</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="nav-bar">
+              <div class="nav-item active">
+                <div class="nav-icon">🏠</div>
+                <span>Home</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">📅</div>
+                <span>History</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">💬</div>
+                <span>Coach</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">👤</div>
+                <span>Profile</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="annotations">
+          <h4>Design Notes</h4>
+          <ul>
+            <li>One-tap access to today's workout</li>
+            <li>Large "Start" button (48px+ height)</li>
+            <li>Week view shows AI-scheduled rest days</li>
+            <li>Streak for motivation (no gamification)</li>
+          </ul>
+        </div>
+      </div>
+      
+      <!-- Screen 2: Active Workout -->
+      <div class="wireframe-section">
+        <div class="wireframe-title">
+          <span class="screen-num">2</span>
+          Active Workout
+        </div>
+        <div class="phone-frame">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span class="time">9:47</span>
+              <div class="icons">
+                <span class="icon"></span>
+                <span class="icon"></span>
+                <span class="icon"></span>
+              </div>
+            </div>
+            
+            <div class="screen-content" style="height: calc(100% - 44px); padding-bottom: 20px;">
+              <div class="workout-header">
+                <span class="back">←</span>
+                <span class="title">Upper Body Strength</span>
+                <span class="more">⋯</span>
+              </div>
+              
+              <div class="progress-bar">
+                <div class="fill"></div>
+              </div>
+              <div class="progress-text">Exercise 2 of 6 • Set 2 of 3</div>
+              
+              <div class="current-exercise">
+                <div class="exercise-name">Dumbbell Bench Press</div>
+                <div class="exercise-target">Target: 3 sets × 10 reps</div>
+                
+                <div class="input-row">
+                  <div class="input-group">
+                    <label>REPS COMPLETED</label>
+                    <div class="stepper">
+                      <button>−</button>
+                      <span class="value">10</span>
+                      <button>+</button>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="input-group">
+                  <label>WEIGHT (LBS)</label>
+                  <div class="weight-chips">
+                    <span class="weight-chip">30</span>
+                    <span class="weight-chip selected">35</span>
+                    <span class="weight-chip">40</span>
+                    <span class="weight-chip">45</span>
+                  </div>
+                </div>
+                
+                <button class="complete-set-btn">Complete Set ✓</button>
+              </div>
+              
+              <div class="exercise-list">
+                <div class="exercise-item completed">
+                  <div class="check">✓</div>
+                  <div class="info">
+                    <div class="name">Warm-up: Arm Circles</div>
+                    <div class="sets">2 min completed</div>
+                  </div>
+                </div>
+                <div class="exercise-item">
+                  <div class="check"></div>
+                  <div class="info">
+                    <div class="name">Incline Dumbbell Press</div>
+                    <div class="sets">3 sets × 10 reps</div>
+                  </div>
+                </div>
+                <div class="exercise-item">
+                  <div class="check"></div>
+                  <div class="info">
+                    <div class="name">Seated Row</div>
+                    <div class="sets">3 sets × 12 reps</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="annotations">
+          <h4>Design Notes</h4>
+          <ul>
+            <li>Stepper for reps (no keyboard needed)</li>
+            <li>Weight chips from user's history</li>
+            <li>Single tap to complete set</li>
+            <li>Clear progress indicator at top</li>
+          </ul>
+        </div>
+      </div>
+      
+      <!-- Screen 3: AI Coach -->
+      <div class="wireframe-section">
+        <div class="wireframe-title">
+          <span class="screen-num">3</span>
+          AI Coach
+        </div>
+        <div class="phone-frame">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span class="time">10:15</span>
+              <div class="icons">
+                <span class="icon"></span>
+                <span class="icon"></span>
+                <span class="icon"></span>
+              </div>
+            </div>
+            
+            <div class="screen-content" style="height: calc(100% - 44px - 76px);">
+              <div class="chat-header">
+                <div class="avatar">AI</div>
+                <div class="info">
+                  <div class="name">Your AI Coach</div>
+                  <div class="status">● Online</div>
+                </div>
+              </div>
+              
+              <div class="chat-messages">
+                <div class="message ai">
+                  Hi Michael! Your shoulder press has improved 15% over 3 weeks. How's the knee feeling after yesterday?
+                </div>
+                <div class="message user">
+                  It's a bit stiff. Should I still do cardio?
+                </div>
+                <div class="message ai">
+                  I'd suggest swapping treadmill for 20 min on the bike today. Lower impact, same benefit. Want me to update your plan?
+                </div>
+              </div>
+              
+              <div class="quick-actions">
+                <div class="label">QUICK QUESTIONS</div>
+                <div class="quick-btns">
+                  <button class="quick-btn">Modify workout</button>
+                  <button class="quick-btn">I'm tired today</button>
+                  <button class="quick-btn">Show alternatives</button>
+                </div>
+              </div>
+              
+              <div class="chat-input">
+                <input type="text" placeholder="Ask anything...">
+                <button class="send-btn">↑</button>
+              </div>
+            </div>
+            
+            <div class="nav-bar">
+              <div class="nav-item">
+                <div class="nav-icon">🏠</div>
+                <span>Home</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">📅</div>
+                <span>History</span>
+              </div>
+              <div class="nav-item active">
+                <div class="nav-icon">💬</div>
+                <span>Coach</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">👤</div>
+                <span>Profile</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="annotations">
+          <h4>Design Notes</h4>
+          <ul>
+            <li>AI has full context of user history</li>
+            <li>Proactive insights, not just reactive</li>
+            <li>Quick action buttons for common asks</li>
+            <li>Large 48px send button</li>
+          </ul>
+        </div>
+      </div>
+      
+      <!-- Screen 4: History -->
+      <div class="wireframe-section">
+        <div class="wireframe-title">
+          <span class="screen-num">4</span>
+          History
+        </div>
+        <div class="phone-frame">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span class="time">10:30</span>
+              <div class="icons">
+                <span class="icon"></span>
+                <span class="icon"></span>
+                <span class="icon"></span>
+              </div>
+            </div>
+            
+            <div class="screen-content" style="height: calc(100% - 44px - 76px);">
+              <div class="history-header">
+                <h1>History</h1>
+                <p>Track your progress over time</p>
+              </div>
+              
+              <div class="calendar-nav">
+                <span class="month">December 2025</span>
+                <div class="arrows">
+                  <span class="arrow">‹</span>
+                  <span class="arrow">›</span>
+                </div>
+              </div>
+              
+              <div class="calendar-grid">
+                <div class="day-header">S</div>
+                <div class="day-header">M</div>
+                <div class="day-header">T</div>
+                <div class="day-header">W</div>
+                <div class="day-header">T</div>
+                <div class="day-header">F</div>
+                <div class="day-header">S</div>
+                
+                <div class="day-cell empty"></div>
+                <div class="day-cell workout">1</div>
+                <div class="day-cell">2</div>
+                <div class="day-cell workout">3</div>
+                <div class="day-cell">4</div>
+                <div class="day-cell workout">5</div>
+                <div class="day-cell">6</div>
+                
+                <div class="day-cell">7</div>
+                <div class="day-cell workout">8</div>
+                <div class="day-cell">9</div>
+                <div class="day-cell workout">10</div>
+                <div class="day-cell">11</div>
+                <div class="day-cell workout">12</div>
+                <div class="day-cell">13</div>
+                
+                <div class="day-cell">14</div>
+                <div class="day-cell workout">15</div>
+                <div class="day-cell workout">16</div>
+                <div class="day-cell">17</div>
+                <div class="day-cell workout selected">18</div>
+                <div class="day-cell today">19</div>
+                <div class="day-cell">20</div>
+                
+                <div class="day-cell">21</div>
+                <div class="day-cell">22</div>
+                <div class="day-cell">23</div>
+                <div class="day-cell">24</div>
+                <div class="day-cell">25</div>
+                <div class="day-cell">26</div>
+                <div class="day-cell">27</div>
+              </div>
+              
+              <div class="history-stats">
+                <div class="stat-card">
+                  <div class="value">14</div>
+                  <div class="label">Workouts</div>
+                </div>
+                <div class="stat-card">
+                  <div class="value">8.2h</div>
+                  <div class="label">Total Time</div>
+                </div>
+                <div class="stat-card">
+                  <div class="value">12</div>
+                  <div class="label">Day Streak</div>
+                </div>
+              </div>
+              
+              <div class="section-title">December 18</div>
+              <div class="recent-workout">
+                <div class="date">Wednesday</div>
+                <div class="name">Lower Body + Core</div>
+                <div class="details">
+                  <div class="detail"><span>5</span> exercises</div>
+                  <div class="detail"><span>38</span> min</div>
+                  <div class="detail"><span>100%</span> completed</div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="nav-bar">
+              <div class="nav-item">
+                <div class="nav-icon">🏠</div>
+                <span>Home</span>
+              </div>
+              <div class="nav-item active">
+                <div class="nav-icon">📅</div>
+                <span>History</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">💬</div>
+                <span>Coach</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">👤</div>
+                <span>Profile</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="annotations">
+          <h4>Design Notes</h4>
+          <ul>
+            <li>Calendar view shows workout days (green)</li>
+            <li>Tap any day to see that workout</li>
+            <li>Monthly stats at a glance</li>
+            <li>No complex charts—just clarity</li>
+          </ul>
+        </div>
+      </div>
+      
+      <!-- Screen 5: Profile -->
+      <div class="wireframe-section">
+        <div class="wireframe-title">
+          <span class="screen-num">5</span>
+          Profile
+        </div>
+        <div class="phone-frame">
+          <div class="phone-screen">
+            <div class="status-bar">
+              <span class="time">10:45</span>
+              <div class="icons">
+                <span class="icon"></span>
+                <span class="icon"></span>
+                <span class="icon"></span>
+              </div>
+            </div>
+            
+            <div class="screen-content" style="height: calc(100% - 44px - 76px);">
+              <div class="profile-header">
+                <div class="profile-avatar">M</div>
+                <div class="name">Michael Chen</div>
+                <div class="joined">Member since Nov 2025</div>
+              </div>
+              
+              <div class="profile-section">
+                <div class="profile-section-title">MY GOALS</div>
+                <div style="margin-bottom: 12px;">
+                  <span class="goal-tag">Build Strength</span>
+                  <span class="goal-tag">Improve Mobility</span>
+                  <span class="goal-tag">Knee Rehab</span>
+                </div>
+              </div>
+              
+              <div class="profile-section">
+                <div class="profile-section-title">LIMITATIONS & NOTES</div>
+                <div style="margin-bottom: 12px;">
+                  <span class="limitation-tag">Left Knee - ACL recovery</span>
+                  <span class="limitation-tag">Lower Back</span>
+                </div>
+              </div>
+              
+              <div class="profile-section">
+                <div class="profile-section-title">SETTINGS</div>
+                <div class="profile-card">
+                  <div class="profile-row">
+                    <span class="label">Equipment Access</span>
+                    <span class="value">Full Gym <span class="arrow">›</span></span>
+                  </div>
+                  <div class="profile-row">
+                    <span class="label">Workout Days</span>
+                    <span class="value">Mon, Tue, Thu, Fri <span class="arrow">›</span></span>
+                  </div>
+                  <div class="profile-row">
+                    <span class="label">Session Length</span>
+                    <span class="value">45 min <span class="arrow">›</span></span>
+                  </div>
+                  <div class="profile-row">
+                    <span class="label">Units</span>
+                    <span class="value">Pounds (lbs) <span class="arrow">›</span></span>
+                  </div>
+                </div>
+              </div>
+              
+              <button class="edit-btn">Edit Profile</button>
+              <button class="logout-btn">Log Out</button>
+            </div>
+            
+            <div class="nav-bar">
+              <div class="nav-item">
+                <div class="nav-icon">🏠</div>
+                <span>Home</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">📅</div>
+                <span>History</span>
+              </div>
+              <div class="nav-item">
+                <div class="nav-icon">💬</div>
+                <span>Coach</span>
+              </div>
+              <div class="nav-item active">
+                <div class="nav-icon">👤</div>
+                <span>Profile</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="annotations">
+          <h4>Design Notes</h4>
+          <ul>
+            <li>Goals & limitations visible (AI uses these)</li>
+            <li>Easy to update preferences</li>
+            <li>Equipment access affects AI plans</li>
+            <li>Physio notes prominent for safety</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Design System Legend -->
+    <div class="legend">
+      <h3>40+ Design System Principles</h3>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <div class="icon blue">Aa</div>
+          <div class="text">
+            <h4>Typography</h4>
+            <p>Minimum 16px body, 20px+ actions, 26px headers. High contrast on all backgrounds.</p>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="icon green">☐</div>
+          <div class="text">
+            <h4>Touch Targets</h4>
+            <p>All interactive elements 44×44px minimum. Generous spacing between tappable items.</p>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="icon purple">◐</div>
+          <div class="text">
+            <h4>Contrast</h4>
+            <p>WCAG AA compliant (4.5:1 ratio). No light gray text. Clear visual hierarchy.</p>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="icon orange">⚡</div>
+          <div class="text">
+            <h4>Simplicity</h4>
+            <p>One primary action per screen. Progressive disclosure for advanced options.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
