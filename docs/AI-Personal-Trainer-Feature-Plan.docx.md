@@ -2,6 +2,65 @@
 
 ## *Feature Plan & Development Roadmap*
 
+---
+
+# **Phase 1 Implementation Status**
+
+> **Last Updated:** December 24, 2024
+> **Status:** Phase 1 MVP Complete
+
+## **What Was Built**
+
+| Feature | Status | Notes |
+| ----- | ----- | ----- |
+| User Authentication | ✅ Complete | Google Sign-In only (simplified from email + Google) |
+| Onboarding Flow | ✅ Complete | 5-step wizard instead of AI conversation |
+| AI Workout Generation | ✅ Complete | Claude API via Next.js API routes |
+| Workout Logging | ✅ Complete | Stepper + weight chips as designed |
+| Workout History | ✅ Complete | Calendar view with monthly stats |
+| AI Coach Chat | ✅ Complete | Full chat interface with quick actions |
+| Dashboard | ✅ Complete | Today's workout, weekly calendar, stats |
+| Profile Screen | ✅ Complete | Goals, limitations, preferences display |
+
+## **Technical Changes from Original Plan**
+
+| Original Plan | Actual Implementation | Reason |
+| ----- | ----- | ----- |
+| Firebase Cloud Functions | Next.js API Routes | Simpler deployment, same security |
+| Email + Google Auth | Google Sign-In only | User preference, faster onboarding |
+| AI-powered onboarding chat | 5-step form wizard | More predictable, easier for 60+ users |
+| Firebase Hosting | Vercel-ready (or Firebase) | Next.js native deployment options |
+
+## **Project Structure**
+
+```
+ai-personal-trainer/
+├── src/
+│   ├── app/                    # Next.js App Router
+│   │   ├── page.tsx           # Landing/Login
+│   │   ├── (protected)/       # Auth-required pages
+│   │   │   ├── dashboard/     # Home screen
+│   │   │   ├── workout/       # Active workout logging
+│   │   │   ├── history/       # Calendar + history
+│   │   │   ├── coach/         # AI chat
+│   │   │   ├── profile/       # User settings
+│   │   │   └── onboarding/    # Setup wizard
+│   │   └── api/
+│   │       ├── chat/          # Claude chat endpoint
+│   │       └── generate-plan/ # Workout generation
+│   ├── components/
+│   │   ├── ui/               # Stepper, WeightChips
+│   │   ├── auth/             # GoogleSignInButton
+│   │   └── layout/           # Sidebar, MobileNav
+│   ├── lib/firebase/         # Config, auth, firestore helpers
+│   ├── context/              # AuthContext
+│   └── types/                # TypeScript definitions
+├── .env.local                # API keys (configured)
+└── docs/                     # Wireframes + this plan
+```
+
+---
+
 # **Executive Summary**
 
 This document outlines the feature plan for an AI-powered personal training platform designed specifically for users aged 40 and above. The platform combines Anthropic's Claude AI with Google Firebase to deliver personalized workout plans that adapt to individual goals, including physiotherapy and rehabilitation needs.
@@ -10,9 +69,9 @@ This document outlines the feature plan for an AI-powered personal training plat
 
 ## **Guiding Principles**
 
-1. **Minimal Input, Maximum Value:** Capture only reps, weight/duration, and optional effort rating  
-2. **AI Does the Heavy Lifting:** The AI analyzes patterns—users just train  
-3. **40+ First Design:** Large touch targets, high contrast, clear typography, no clutter  
+1. **Minimal Input, Maximum Value:** Capture only reps, weight/duration, and optional effort rating
+2. **AI Does the Heavy Lifting:** The AI analyzes patterns—users just train
+3. **40+ First Design:** Large touch targets, high contrast, clear typography, no clutter
 4. **Progressive Disclosure:** Simple by default, depth available for those who want it
 
 # **Target Audience: 60+**
@@ -33,135 +92,166 @@ Most fitness apps fail because they ask users to track too much. Here's our appr
 
 ## **What Users Actually Log (The 'Must-Haves')**
 
-| Data Point | Input Method | Why It Matters |
+| Data Point | Input Method | Status |
 | ----- | ----- | ----- |
-| Reps completed | Stepper (+/-) | Core progression metric |
-| Weight used | Quick-select chips | Strength progression tracking |
-| Duration (cardio) | Built-in timer | Endurance tracking |
-| Completed (yes/no) | Checkbox | Minimum viable data point |
+| Reps completed | Stepper (+/-) | ✅ Implemented |
+| Weight used | Quick-select chips | ✅ Implemented |
+| Duration (cardio) | Built-in timer | ⏳ Phase 2 |
+| Completed (yes/no) | Checkbox | ✅ Implemented |
 
 ## **Optional 'Nice-to-Have' Data**
 
 These are available but never forced. The AI can work without them:
 
-* **Effort rating (1-5 or simple emoji):** Only shown post-workout in a summary screen  
-* **Quick note:** Voice-to-text option for 'knee felt tight' type feedback  
+* **Effort rating (1-5 or simple emoji):** Only shown post-workout in a summary screen
+* **Quick note:** Voice-to-text option for 'knee felt tight' type feedback
 * **Skip reason:** If exercise skipped, one-tap reason (pain, fatigue, time)
 
 ## **What We DON'T Ask For**
 
 Explicitly avoiding these common 'feature traps':
 
-* Mood tracking before workouts  
-* Sleep quality input  
-* Nutrition logging  
-* Heart rate input (unless wearable integration later)  
-* Form quality self-assessment  
+* Mood tracking before workouts
+* Sleep quality input
+* Nutrition logging
+* Heart rate input (unless wearable integration later)
+* Form quality self-assessment
 * Perceived exertion scales (RPE)
 
 # **Development Roadmap**
 
-## **Phase 1: MVP (Weeks 1-6)**
+## **Phase 1: MVP ✅ COMPLETE**
 
 **Goal:** Launch a working product that one person can use to train and see AI-generated plans adapt over time.
 
 ### **Core Features**
 
-1. **User Authentication:** Firebase Auth (email/password, Google sign-in)  
-2. **Onboarding Conversation:** AI chat that collects goals, limitations, experience level, equipment access  
-3. **AI Workout Generation:** Claude generates first workout plan based on onboarding  
-4. **Workout Logging (Minimal):** Check off exercises, log reps/weight with stepper/chips  
-5. **Workout History:** Simple list view of past sessions  
-6. **Plan Adaptation:** AI reviews past workouts and adjusts next plan
+| Feature | Status | Implementation |
+| ----- | ----- | ----- |
+| User Authentication | ✅ | Google Sign-In via Firebase Auth |
+| Onboarding | ✅ | 5-step form: goals, limitations, equipment, schedule, units |
+| AI Workout Generation | ✅ | Claude generates weekly plans via `/api/generate-plan` |
+| Workout Logging | ✅ | Stepper for reps, weight chips, set completion |
+| Workout History | ✅ | Calendar view with drill-down to workout details |
+| Plan Adaptation | ✅ | AI Coach can modify plans through chat |
 
-### **Data Model (Firestore)**
+### **Data Model (Firestore) - Implemented**
 
-users/{userId}: profile, goals, limitations, onboardingComplete
+```
+users/{userId}
+  ├── email, displayName, photoURL
+  ├── createdAt, onboardingComplete
+  └── profile: { goals[], limitations[], equipment, experienceLevel,
+                 workoutDays[], sessionLength, units }
 
-users/{userId}/workouts/{workoutId}: date, exercises\[\], completed, notes
+users/{userId}/workouts/{workoutId}
+  ├── date, planId, name, completed, duration
+  └── exercises[]: { id, name, targetSets, targetReps,
+                     completedSets[]: { reps, weight, completed },
+                     skipped, skipReason?, notes? }
 
-users/{userId}/plans/{planId}: generatedAt, workoutSchedule\[\], active
+users/{userId}/plans/{planId}
+  ├── generatedAt, generatedBy, active, validUntil
+  └── workoutSchedule[]: { dayOfWeek, workoutType, workoutName,
+                           exercises[]: { id, name, sets, reps, notes? } }
+```
 
-## **Phase 2: Refinement (Weeks 7-12)**
+## **Phase 2: Refinement (Next)**
 
 **Goal:** Improve the AI's intelligence and add features users actually request after MVP testing.
 
 ### **Features**
 
-1. **Smart Rest Timer:** AI-suggested rest based on exercise type and user history  
-2. **Exercise Substitutions:** 'Can't do this? Here are alternatives' with one-tap swap  
-3. **Progress Visualization:** Simple charts showing weight progression per exercise  
-4. **AI Coach Chat:** Ask questions anytime ('should I push through knee pain?')  
-5. **Physio Mode:** Specific onboarding path for rehabilitation goals  
-6. **Quick-log Presets:** Remember user's common weights per exercise
+| Feature | Priority | Notes |
+| ----- | ----- | ----- |
+| Smart Rest Timer | High | AI-suggested rest between sets |
+| Exercise Substitutions | High | "Can't do this? Here are alternatives" |
+| Progress Visualization | Medium | Charts showing weight progression |
+| Duration Timer | Medium | For cardio exercises |
+| Physio Mode | Medium | Specific path for rehabilitation |
+| Quick-log Presets | Low | Remember user's common weights |
 
-## **Phase 3: Scale (Weeks 13-20)**
+## **Phase 3: Scale**
 
 **Goal:** Features that support growth and retention.
 
 ### **Features**
 
-1. **Weekly AI Summary:** Email/notification with progress insights  
-2. **Goal Milestones:** Celebrate achievements without gamification overload  
-3. **Offline Mode:** Log workouts without connection, sync later  
+1. **Weekly AI Summary:** Email/notification with progress insights
+2. **Goal Milestones:** Celebrate achievements without gamification overload
+3. **Offline Mode:** Log workouts without connection, sync later
 4. **Export Data:** Share progress with a physiotherapist or doctor
+5. **PWA Installation:** Full mobile app experience
 
 # **Technical Architecture**
 
-## **Stack Overview**
+## **Stack Overview - Implemented**
 
-| Layer | Technology |
-| ----- | ----- |
-| Frontend | React/Next.js (PWA for mobile-like experience) |
-| Backend | Firebase Cloud Functions (Node.js) |
-| Database | Firestore (real-time sync, offline support) |
-| Authentication | Firebase Auth |
-| AI Engine | Anthropic Claude API (via Cloud Functions) |
-| Hosting | Firebase Hosting |
+| Layer | Technology | Status |
+| ----- | ----- | ----- |
+| Frontend | Next.js 14 (App Router) + TypeScript | ✅ |
+| Styling | Tailwind CSS | ✅ |
+| Database | Firestore | ✅ |
+| Authentication | Firebase Auth (Google) | ✅ |
+| AI Engine | Anthropic Claude API (claude-sonnet-4-20250514) | ✅ |
+| API Routes | Next.js API Routes | ✅ |
+| Hosting | Vercel or Firebase Hosting | Ready |
 
-## **AI Integration Points**
+## **AI Integration Points - Implemented**
 
-1. **Onboarding Analysis:** Claude processes conversation to extract structured user profile  
-2. **Plan Generation:** Claude creates workout plans with context from user profile \+ exercise database  
-3. **Adaptation Engine:** Claude reviews workout logs and adjusts future plans  
-4. **Coach Chat:** Claude answers questions with full context of user's history and goals
+| Integration | Endpoint | Status |
+| ----- | ----- | ----- |
+| Plan Generation | `/api/generate-plan` | ✅ |
+| Coach Chat | `/api/chat` | ✅ |
+| Onboarding Analysis | Form-based (not AI) | Changed |
+| Adaptation Engine | Via Coach Chat | ✅ |
 
 # **UI/UX Guidelines**
 
-## **Accessibility First (40+ Design)**
+## **Accessibility First (60+ Design) - Implemented**
 
-* **Typography:** Minimum 16px body text, 20px+ for action items  
-* **Touch Targets:** Minimum 48x48px for all interactive elements  
-* **Contrast:** WCAG AA minimum (4.5:1 for text)  
-* **Spacing:** Generous whitespace, no cramped layouts  
-* **Loading States:** Clear feedback when AI is processing
+* **Typography:** 16px body, 20px+ actions, 32px headers ✅
+* **Touch Targets:** 48x48px minimum, 52px for steppers ✅
+* **Contrast:** WCAG AA compliant (4.5:1 for text) ✅
+* **Spacing:** Generous whitespace, card-based layouts ✅
+* **Loading States:** Spinners and "Thinking..." indicators ✅
 
-## **Screen Hierarchy**
+## **Screen Hierarchy - Implemented**
 
-| Screen | Purpose & Content |
-| ----- | ----- |
-| Home/Dashboard | Today's workout at a glance, one-tap to start |
-| Active Workout | Exercise list, current exercise prominent, logging controls |
-| History | Calendar view of completed workouts |
-| AI Coach | Chat interface for questions and plan adjustments |
-| Profile | Goals, limitations, preferences (editable) |
+| Screen | Route | Status |
+| ----- | ----- | ----- |
+| Landing/Login | `/` | ✅ |
+| Dashboard | `/dashboard` | ✅ |
+| Active Workout | `/workout` | ✅ |
+| History | `/history` | ✅ |
+| AI Coach | `/coach` | ✅ |
+| Profile | `/profile` | ✅ |
+| Onboarding | `/onboarding` | ✅ |
 
 # **Success Metrics**
 
 How we'll know if we're getting the balance right:
 
-* **Logging Completion Rate:** Target 80%+ of exercises have reps/weight logged  
-* **Time to Log:** Average \<30 seconds per exercise  
-* **Weekly Active Users:** Users completing 2+ workouts per week  
-* **AI Relevance:** % of AI suggestions accepted vs modified  
+* **Logging Completion Rate:** Target 80%+ of exercises have reps/weight logged
+* **Time to Log:** Average <30 seconds per exercise
+* **Weekly Active Users:** Users completing 2+ workouts per week
+* **AI Relevance:** % of AI suggestions accepted vs modified
 * **Optional Data Capture:** Monitor if users voluntarily add notes/ratings
 
-# **Recommended Next Steps**
+# **Next Steps (Post Phase 1)**
 
-* Finalize exercise database structure and initial content (100-150 exercises)  
-* Design the onboarding conversation flow for Claude  
-* Create wireframes for core screens (Home, Active Workout, AI Coach)  
-* Set up Firebase project and basic authentication  
-* Prototype the AI workout generation prompt engineering
+1. ~~Finalize exercise database structure~~ → AI generates exercises dynamically
+2. ~~Design onboarding conversation flow~~ → Replaced with form wizard
+3. ~~Create wireframes~~ → ✅ Complete (in `/docs`)
+4. ~~Set up Firebase project~~ → ✅ Complete
+5. ~~Prototype AI workout generation~~ → ✅ Complete
+6. **User testing with target demographic**
+7. **Add smart rest timer**
+8. **Implement exercise substitution suggestions**
+9. **Deploy to production (Vercel or Firebase Hosting)**
+
+---
 
 *— End of Feature Plan —*
+
+*Phase 1 completed: December 24, 2024*
