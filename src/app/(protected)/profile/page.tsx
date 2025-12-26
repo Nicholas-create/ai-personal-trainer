@@ -2,9 +2,25 @@
 
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
+import {
+  EditableChipField,
+  EditableSelectField,
+  EditableSessionLength,
+  EditableDaysField,
+} from '@/components/profile';
+import { ExerciseLibrary } from '@/components/exercises';
+import {
+  GOAL_OPTIONS,
+  LIMITATION_OPTIONS,
+  EQUIPMENT_OPTIONS,
+  EXPERIENCE_OPTIONS,
+  DAY_OPTIONS,
+  SESSION_LENGTH_OPTIONS,
+  UNIT_OPTIONS,
+} from '@/types/onboarding';
 
 export default function ProfilePage() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, refreshUser } = useAuth();
   const router = useRouter();
 
   const handleSignOut = async () => {
@@ -12,7 +28,7 @@ export default function ProfilePage() {
     router.push('/');
   };
 
-  const handleEditProfile = () => {
+  const handleRedoOnboarding = () => {
     router.push('/onboarding');
   };
 
@@ -35,12 +51,6 @@ export default function ProfilePage() {
             <p className="text-gray-500 text-sm mb-4">{user.email}</p>
 
             <button
-              onClick={handleEditProfile}
-              className="w-full py-2.5 px-5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors mb-2"
-            >
-              Edit Profile
-            </button>
-            <button
               onClick={handleSignOut}
               className="w-full py-2.5 px-5 bg-red-50 text-red-600 rounded-xl font-semibold hover:bg-red-100 transition-colors"
             >
@@ -49,47 +59,35 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Profile Details */}
+        {/* Profile Details - Editable */}
         <div className="lg:col-span-2 space-y-4 lg:space-y-3">
           {/* Goals */}
-          <div className="bg-white rounded-2xl p-4 lg:p-3 shadow-sm">
-            <h3 className="text-xs font-semibold text-gray-500 mb-2">
-              MY FITNESS GOALS
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {user.profile?.goals?.map((goal) => (
-                <span
-                  key={goal}
-                  className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full font-medium text-sm"
-                >
-                  {goal.replace('_', ' ')}
-                </span>
-              )) || (
-                <span className="text-gray-500 text-sm">No goals set yet</span>
-              )}
-            </div>
-          </div>
+          <EditableChipField
+            label="MY FITNESS GOALS"
+            fieldName="goals"
+            currentValues={user.profile?.goals || []}
+            allOptions={GOAL_OPTIONS}
+            colorScheme="blue"
+            userId={user.uid}
+            refreshUser={refreshUser}
+            emptyText="No goals set yet"
+            allowCustom
+            customPlaceholder="Add a custom goal..."
+          />
 
           {/* Limitations */}
-          <div className="bg-white rounded-2xl p-4 lg:p-3 shadow-sm">
-            <h3 className="text-xs font-semibold text-gray-500 mb-2">
-              LIMITATIONS & HEALTH NOTES
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {user.profile?.limitations?.length ? (
-                user.profile.limitations.map((limit) => (
-                  <span
-                    key={limit}
-                    className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-full font-medium text-sm"
-                  >
-                    {limit.replace('_', ' ')}
-                  </span>
-                ))
-              ) : (
-                <span className="text-gray-500 text-sm">No limitations specified</span>
-              )}
-            </div>
-          </div>
+          <EditableChipField
+            label="LIMITATIONS & HEALTH NOTES"
+            fieldName="limitations"
+            currentValues={user.profile?.limitations || []}
+            allOptions={LIMITATION_OPTIONS}
+            colorScheme="amber"
+            userId={user.uid}
+            refreshUser={refreshUser}
+            emptyText="No limitations specified"
+            allowCustom
+            customPlaceholder="Add a specific limitation or health note..."
+          />
 
           {/* Preferences */}
           <div className="bg-white rounded-2xl p-4 lg:p-3 shadow-sm">
@@ -97,39 +95,69 @@ export default function ProfilePage() {
               WORKOUT PREFERENCES
             </h3>
             <div className="grid grid-cols-2 gap-2">
-              <div className="p-3 lg:p-2 bg-gray-50 rounded-xl">
-                <p className="text-gray-500 text-xs">Equipment</p>
-                <p className="font-semibold text-gray-900 text-sm">
-                  {user.profile?.equipment?.replace('_', ' ') || 'Not set'}
-                </p>
-              </div>
-              <div className="p-3 lg:p-2 bg-gray-50 rounded-xl">
-                <p className="text-gray-500 text-xs">Session Length</p>
-                <p className="font-semibold text-gray-900 text-sm">
-                  {user.profile?.sessionLength || 45} minutes
-                </p>
-              </div>
-              <div className="p-3 lg:p-2 bg-gray-50 rounded-xl">
-                <p className="text-gray-500 text-xs">Workout Days</p>
-                <p className="font-semibold text-gray-900 text-sm">
-                  {user.profile?.workoutDays?.join(', ') || 'Not set'}
-                </p>
-              </div>
-              <div className="p-3 lg:p-2 bg-gray-50 rounded-xl">
-                <p className="text-gray-500 text-xs">Units</p>
-                <p className="font-semibold text-gray-900 text-sm">
-                  {user.profile?.units === 'kg' ? 'Kilograms (kg)' : 'Pounds (lbs)'}
-                </p>
-              </div>
-              <div className="p-3 lg:p-2 bg-gray-50 rounded-xl col-span-2">
-                <p className="text-gray-500 text-xs">Experience Level</p>
-                <p className="font-semibold text-gray-900 text-sm capitalize">
-                  {user.profile?.experienceLevel || 'Not set'}
-                </p>
+              <EditableSelectField
+                label="Equipment"
+                fieldName="equipment"
+                currentValue={user.profile?.equipment || ''}
+                options={EQUIPMENT_OPTIONS}
+                userId={user.uid}
+                refreshUser={refreshUser}
+              />
+
+              <EditableSessionLength
+                currentValue={user.profile?.sessionLength || 45}
+                options={SESSION_LENGTH_OPTIONS}
+                userId={user.uid}
+                refreshUser={refreshUser}
+              />
+
+              <EditableDaysField
+                currentValues={user.profile?.workoutDays || []}
+                options={DAY_OPTIONS}
+                userId={user.uid}
+                refreshUser={refreshUser}
+              />
+
+              <EditableSelectField
+                label="Units"
+                fieldName="units"
+                currentValue={user.profile?.units || 'lbs'}
+                options={UNIT_OPTIONS}
+                userId={user.uid}
+                refreshUser={refreshUser}
+              />
+
+              <div className="col-span-2">
+                <EditableSelectField
+                  label="Experience Level"
+                  fieldName="experienceLevel"
+                  currentValue={user.profile?.experienceLevel || ''}
+                  options={EXPERIENCE_OPTIONS}
+                  userId={user.uid}
+                  refreshUser={refreshUser}
+                />
               </div>
             </div>
           </div>
+
+          {/* Re-do Onboarding - Secondary Action */}
+          <div className="pt-2">
+            <button
+              onClick={handleRedoOnboarding}
+              className="w-full py-2.5 px-5 bg-gray-100 text-gray-600 rounded-xl font-medium hover:bg-gray-200 transition-colors text-sm"
+            >
+              Re-do Onboarding Wizard
+            </button>
+            <p className="text-xs text-gray-500 text-center mt-1">
+              Start fresh with the guided setup
+            </p>
+          </div>
         </div>
+      </div>
+
+      {/* Exercise Library - Full Width */}
+      <div className="mt-6">
+        <ExerciseLibrary userId={user.uid} />
       </div>
     </div>
   );

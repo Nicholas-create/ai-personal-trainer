@@ -6,6 +6,8 @@ export interface PlanExercise {
   notes?: string;
 }
 
+export type PlanStatus = 'active' | 'paused' | 'archived' | 'expired';
+
 export interface DaySchedule {
   dayOfWeek: string;
   workoutType: 'upper_body' | 'lower_body' | 'full_body' | 'cardio' | 'rest';
@@ -21,6 +23,16 @@ export interface WorkoutPlan {
   active: boolean;
   workoutSchedule: DaySchedule[];
   validUntil: Date;
+
+  // Program management fields
+  name: string;
+  status: PlanStatus;
+  startedAt?: Date;
+  pausedAt?: Date;
+  resumedAt?: Date;
+  archivedAt?: Date;
+  extendedAt?: Date;
+  originalValidUntil?: Date;
 }
 
 export interface TodayWorkout {

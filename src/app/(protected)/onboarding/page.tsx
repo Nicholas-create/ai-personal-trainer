@@ -1,146 +1,210 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { updateUserProfile } from '@/lib/firebase/firestore';
 import type { UserProfile } from '@/types/user';
+import {
+  OnboardingState,
+  OnboardingChatResponse,
+  getEmptyOnboardingState,
+  isOnboardingComplete,
+  GOAL_OPTIONS,
+  LIMITATION_OPTIONS,
+  EQUIPMENT_OPTIONS,
+  EXPERIENCE_OPTIONS,
+  DAY_OPTIONS,
+  SESSION_LENGTH_OPTIONS,
+  UNIT_OPTIONS,
+} from '@/types/onboarding';
 
-const GOALS = [
-  { id: 'strength', label: 'Build Strength', icon: '💪' },
-  { id: 'mobility', label: 'Improve Mobility', icon: '🧘' },
-  { id: 'weight_loss', label: 'Lose Weight', icon: '⚖️' },
-  { id: 'endurance', label: 'Build Endurance', icon: '🏃' },
-  { id: 'rehabilitation', label: 'Rehabilitation', icon: '🩹' },
-  { id: 'general', label: 'General Fitness', icon: '❤️' },
-];
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
 
-const LIMITATIONS = [
-  { id: 'knee', label: 'Knee Issues', icon: '🦵' },
-  { id: 'back', label: 'Back Problems', icon: '🔙' },
-  { id: 'shoulder', label: 'Shoulder Issues', icon: '💪' },
-  { id: 'hip', label: 'Hip Problems', icon: '🦴' },
-  { id: 'wrist', label: 'Wrist/Hand Issues', icon: '🤚' },
-  { id: 'none', label: 'No Limitations', icon: '✅' },
-];
+const FIELD_LABELS: Record<keyof OnboardingState, string> = {
+  goals: 'Goals',
+  limitations: 'Limitations',
+  equipment: 'Equipment',
+  experienceLevel: 'Experience',
+  workoutDays: 'Workout Days',
+  sessionLength: 'Session Length',
+  units: 'Units',
+};
 
-const EQUIPMENT = [
-  { id: 'full_gym', label: 'Full Gym Access', description: 'Machines, free weights, cables' },
-  { id: 'home', label: 'Home Equipment', description: 'Dumbbells, resistance bands, bench' },
-  { id: 'minimal', label: 'Minimal/Bodyweight', description: 'Little to no equipment' },
-];
+function getValueLabel(field: keyof OnboardingState, value: string | string[] | number | null): string {
+  if (value === null) return '';
 
-const EXPERIENCE = [
-  { id: 'beginner', label: 'Beginner', description: 'New to exercise or returning after a long break' },
-  { id: 'intermediate', label: 'Intermediate', description: 'Some experience, know basic exercises' },
-  { id: 'advanced', label: 'Advanced', description: 'Very experienced, comfortable with complex movements' },
-];
+  const labelMaps: Record<string, Record<string, string>> = {
+    goals: Object.fromEntries(GOAL_OPTIONS.map(o => [o.id, o.label])),
+    limitations: Object.fromEntries(LIMITATION_OPTIONS.map(o => [o.id, o.label])),
+    equipment: Object.fromEntries(EQUIPMENT_OPTIONS.map(o => [o.id, o.label])),
+    experienceLevel: Object.fromEntries(EXPERIENCE_OPTIONS.map(o => [o.id, o.label])),
+    workoutDays: Object.fromEntries(DAY_OPTIONS.map(o => [o.id, o.label.slice(0, 3)])),
+    sessionLength: Object.fromEntries(SESSION_LENGTH_OPTIONS.map(o => [String(o.id), o.label])),
+    units: Object.fromEntries(UNIT_OPTIONS.map(o => [o.id, o.label])),
+  };
 
-const DAYS = [
-  { id: 'monday', label: 'Mon' },
-  { id: 'tuesday', label: 'Tue' },
-  { id: 'wednesday', label: 'Wed' },
-  { id: 'thursday', label: 'Thu' },
-  { id: 'friday', label: 'Fri' },
-  { id: 'saturday', label: 'Sat' },
-  { id: 'sunday', label: 'Sun' },
-];
-
-const DURATIONS = [
-  { id: 30, label: '30 min' },
-  { id: 45, label: '45 min' },
-  { id: 60, label: '60 min' },
-];
+  if (Array.isArray(value)) {
+    return value.map(v => labelMaps[field]?.[v] || v).join(', ');
+  }
+  return labelMaps[field]?.[String(value)] || String(value);
+}
 
 export default function OnboardingPage() {
   const router = useRouter();
   const { user, refreshUser } = useAuth();
-  const [step, setStep] = useState(1);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: '1',
+      role: 'assistant',
+      content: `Hi${user?.displayName ? ` ${user.displayName.split(' ')[0]}` : ''}! I'm excited to help you set up your personalized fitness plan.\n\nLet's start with the most important question - what are your fitness goals? Are you looking to build strength, improve mobility, lose weight, or something else?`,
+    },
+  ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [onboardingData, setOnboardingData] = useState<OnboardingState>(getEmptyOnboardingState());
+  const [suggestedOptions, setSuggestedOptions] = useState<OnboardingChatResponse['suggestedOptions']>({
+    field: 'goals',
+    options: GOAL_OPTIONS.map(o => ({ id: o.id, label: o.label })),
+    multiSelect: true,
+  });
+  const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
+  const [readyToComplete, setReadyToComplete] = useState(false);
+  const [userConfirmed, setUserConfirmed] = useState(false);
 
-  // Form state
-  const [goals, setGoals] = useState<string[]>([]);
-  const [limitations, setLimitations] = useState<string[]>([]);
-  const [equipment, setEquipment] = useState<string>('');
-  const [experience, setExperience] = useState<string>('');
-  const [workoutDays, setWorkoutDays] = useState<string[]>([]);
-  const [sessionLength, setSessionLength] = useState<number>(45);
-  const [units, setUnits] = useState<'lbs' | 'kg'>('lbs');
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  const totalSteps = 5;
+  const sendMessage = async (messageContent: string) => {
+    if (!messageContent.trim() || loading) return;
 
-  const toggleGoal = (goalId: string) => {
-    setGoals((prev) =>
-      prev.includes(goalId)
-        ? prev.filter((g) => g !== goalId)
-        : [...prev, goalId]
-    );
-  };
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: messageContent,
+    };
 
-  const toggleLimitation = (limitId: string) => {
-    if (limitId === 'none') {
-      setLimitations(['none']);
-    } else {
-      setLimitations((prev) => {
-        const newLimits = prev.filter((l) => l !== 'none');
-        return newLimits.includes(limitId)
-          ? newLimits.filter((l) => l !== limitId)
-          : [...newLimits, limitId];
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setInput('');
+    setSelectedOptions([]);
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/onboarding-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          collectedData: onboardingData,
+          userConfirmed,
+        }),
       });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response');
+      }
+
+      const data: OnboardingChatResponse = await response.json();
+
+      // Update collected data
+      if (data.extractedData.length > 0) {
+        setOnboardingData(prev => {
+          const updated = { ...prev };
+          for (const { field, value } of data.extractedData) {
+            (updated as Record<string, unknown>)[field] = value;
+          }
+          return updated;
+        });
+      }
+
+      // Update suggested options
+      if (data.suggestedOptions) {
+        setSuggestedOptions(data.suggestedOptions);
+      } else {
+        setSuggestedOptions(undefined);
+      }
+
+      // Check if complete
+      if (data.isComplete) {
+        setReadyToComplete(true);
+        setUserConfirmed(true);
+      }
+
+      // Add assistant message
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: data.message,
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "Sorry, I encountered an issue. Could you please try again?",
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const toggleDay = (dayId: string) => {
-    setWorkoutDays((prev) =>
-      prev.includes(dayId)
-        ? prev.filter((d) => d !== dayId)
-        : [...prev, dayId]
-    );
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage(input);
   };
 
-  const canProceed = () => {
-    switch (step) {
-      case 1:
-        return goals.length > 0;
-      case 2:
-        return limitations.length > 0;
-      case 3:
-        return equipment !== '' && experience !== '';
-      case 4:
-        return workoutDays.length > 0;
-      case 5:
-        return true;
-      default:
-        return false;
+  const handleOptionClick = (optionId: string) => {
+    if (!suggestedOptions) return;
+
+    if (suggestedOptions.multiSelect) {
+      setSelectedOptions(prev =>
+        prev.includes(optionId)
+          ? prev.filter(id => id !== optionId)
+          : [...prev, optionId]
+      );
+    } else {
+      // Single select - send immediately
+      const option = suggestedOptions.options.find(o => o.id === optionId);
+      if (option) {
+        sendMessage(option.label);
+      }
     }
   };
 
-  const handleNext = () => {
-    if (step < totalSteps) {
-      setStep(step + 1);
-    }
-  };
-
-  const handleBack = () => {
-    if (step > 1) {
-      setStep(step - 1);
-    }
+  const handleSendSelected = () => {
+    if (selectedOptions.length === 0 || !suggestedOptions) return;
+    const labels = selectedOptions
+      .map(id => suggestedOptions.options.find(o => o.id === id)?.label)
+      .filter(Boolean)
+      .join(', ');
+    sendMessage(labels);
   };
 
   const handleComplete = async () => {
-    if (!user) return;
+    if (!user || !isOnboardingComplete(onboardingData)) return;
 
     try {
       setSaving(true);
 
       const profile: UserProfile = {
-        goals,
-        limitations: limitations.filter((l) => l !== 'none'),
-        equipment: equipment as 'full_gym' | 'home' | 'minimal',
-        experienceLevel: experience as 'beginner' | 'intermediate' | 'advanced',
-        workoutDays,
-        sessionLength,
-        units,
+        goals: onboardingData.goals!,
+        limitations: onboardingData.limitations!.filter(l => l !== 'none'),
+        equipment: onboardingData.equipment as 'full_gym' | 'home' | 'minimal',
+        experienceLevel: onboardingData.experienceLevel as 'beginner' | 'intermediate' | 'advanced',
+        workoutDays: onboardingData.workoutDays!,
+        sessionLength: onboardingData.sessionLength!,
+        units: onboardingData.units as 'lbs' | 'kg',
       };
 
       await updateUserProfile(user.uid, profile);
@@ -154,234 +218,179 @@ export default function OnboardingPage() {
     }
   };
 
+  const completedFieldsCount = Object.values(onboardingData).filter(v => v !== null && (Array.isArray(v) ? v.length > 0 : true)).length;
+  const totalFields = 7;
+  const progressPercent = Math.round((completedFieldsCount / totalFields) * 100);
+
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-6">
-      <div className="max-w-2xl mx-auto">
-        {/* Progress */}
-        <div className="mb-8">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-sm text-gray-500">
-              Step {step} of {totalSteps}
-            </span>
-            <span className="text-sm text-gray-500">
-              {Math.round((step / totalSteps) * 100)}% complete
-            </span>
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* Progress Sidebar - Desktop */}
+      <div className="hidden lg:flex lg:flex-col lg:w-80 bg-white border-r border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Setting Up Your Profile</h2>
+        <p className="text-sm text-gray-500 mb-6">{progressPercent}% complete</p>
+
+        {/* Progress Bar */}
+        <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-8">
+          <div
+            className="h-full bg-blue-600 transition-all duration-500"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+
+        {/* Field Checklist */}
+        <div className="space-y-4">
+          {(Object.keys(FIELD_LABELS) as (keyof OnboardingState)[]).map((field) => {
+            const value = onboardingData[field];
+            const isCompleted = value !== null && (Array.isArray(value) ? value.length > 0 : true);
+
+            return (
+              <div key={field} className="flex items-start gap-3">
+                <div className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  isCompleted ? 'bg-green-500' : 'bg-gray-200'
+                }`}>
+                  {isCompleted && (
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium ${isCompleted ? 'text-gray-900' : 'text-gray-400'}`}>
+                    {FIELD_LABELS[field]}
+                  </p>
+                  {isCompleted && (
+                    <p className="text-xs text-gray-500 truncate">
+                      {getValueLabel(field, value)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Complete Button */}
+        {readyToComplete && (
+          <div className="mt-auto pt-6">
+            <button
+              onClick={handleComplete}
+              disabled={saving}
+              className="w-full py-3 px-4 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Complete Setup'}
+            </button>
           </div>
-          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+        )}
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
+        {/* Mobile Progress Bar */}
+        <div className="lg:hidden px-4 py-3 bg-white border-b border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-700">Setting up your profile</span>
+            <span className="text-sm text-gray-500">{progressPercent}%</span>
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
             <div
-              className="h-full bg-blue-600 transition-all duration-300"
-              style={{ width: `${(step / totalSteps) * 100}%` }}
+              className="h-full bg-blue-600 transition-all duration-500"
+              style={{ width: `${progressPercent}%` }}
             />
           </div>
         </div>
 
-        {/* Step 1: Goals */}
-        {step === 1 && (
-          <div>
-            <h1 className="text-2xl font-bold mb-2">What are your fitness goals?</h1>
-            <p className="text-gray-600 mb-8">Select all that apply. We&apos;ll create a plan tailored to your needs.</p>
-
-            <div className="grid grid-cols-2 gap-4">
-              {GOALS.map((goal) => (
-                <button
-                  key={goal.id}
-                  onClick={() => toggleGoal(goal.id)}
-                  className={`p-6 rounded-xl border-2 text-left transition-all ${
-                    goals.includes(goal.id)
-                      ? 'border-blue-600 bg-blue-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  <span className="text-3xl mb-3 block">{goal.icon}</span>
-                  <span className="font-semibold text-lg">{goal.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Limitations */}
-        {step === 2 && (
-          <div>
-            <h1 className="text-2xl font-bold mb-2">Any physical limitations?</h1>
-            <p className="text-gray-600 mb-8">We&apos;ll avoid exercises that might aggravate these areas.</p>
-
-            <div className="grid grid-cols-2 gap-4">
-              {LIMITATIONS.map((limit) => (
-                <button
-                  key={limit.id}
-                  onClick={() => toggleLimitation(limit.id)}
-                  className={`p-6 rounded-xl border-2 text-left transition-all ${
-                    limitations.includes(limit.id)
-                      ? 'border-blue-600 bg-blue-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  <span className="text-3xl mb-3 block">{limit.icon}</span>
-                  <span className="font-semibold text-lg">{limit.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Equipment & Experience */}
-        {step === 3 && (
-          <div>
-            <h1 className="text-2xl font-bold mb-2">Your equipment & experience</h1>
-            <p className="text-gray-600 mb-8">This helps us suggest appropriate exercises.</p>
-
-            <h3 className="font-semibold text-lg mb-4">What equipment do you have access to?</h3>
-            <div className="space-y-3 mb-8">
-              {EQUIPMENT.map((eq) => (
-                <button
-                  key={eq.id}
-                  onClick={() => setEquipment(eq.id)}
-                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${
-                    equipment === eq.id
-                      ? 'border-blue-600 bg-blue-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  <span className="font-semibold text-lg block">{eq.label}</span>
-                  <span className="text-gray-600">{eq.description}</span>
-                </button>
-              ))}
-            </div>
-
-            <h3 className="font-semibold text-lg mb-4">What&apos;s your experience level?</h3>
-            <div className="space-y-3">
-              {EXPERIENCE.map((exp) => (
-                <button
-                  key={exp.id}
-                  onClick={() => setExperience(exp.id)}
-                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${
-                    experience === exp.id
-                      ? 'border-blue-600 bg-blue-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  <span className="font-semibold text-lg block">{exp.label}</span>
-                  <span className="text-gray-600">{exp.description}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 4: Workout Days */}
-        {step === 4 && (
-          <div>
-            <h1 className="text-2xl font-bold mb-2">When do you want to work out?</h1>
-            <p className="text-gray-600 mb-8">Select the days you&apos;re available. We recommend 3-5 days per week.</p>
-
-            <div className="flex flex-wrap gap-3 mb-8">
-              {DAYS.map((day) => (
-                <button
-                  key={day.id}
-                  onClick={() => toggleDay(day.id)}
-                  className={`w-16 h-16 rounded-xl border-2 font-semibold transition-all ${
-                    workoutDays.includes(day.id)
-                      ? 'border-blue-600 bg-blue-600 text-white'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  {day.label}
-                </button>
-              ))}
-            </div>
-
-            <h3 className="font-semibold text-lg mb-4">How long should each session be?</h3>
-            <div className="flex gap-3">
-              {DURATIONS.map((dur) => (
-                <button
-                  key={dur.id}
-                  onClick={() => setSessionLength(dur.id)}
-                  className={`flex-1 p-4 rounded-xl border-2 font-semibold transition-all ${
-                    sessionLength === dur.id
-                      ? 'border-blue-600 bg-blue-600 text-white'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                >
-                  {dur.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 5: Units */}
-        {step === 5 && (
-          <div>
-            <h1 className="text-2xl font-bold mb-2">Almost done!</h1>
-            <p className="text-gray-600 mb-8">Just one more preference.</p>
-
-            <h3 className="font-semibold text-lg mb-4">What units do you prefer for weights?</h3>
-            <div className="flex gap-4">
-              <button
-                onClick={() => setUnits('lbs')}
-                className={`flex-1 p-6 rounded-xl border-2 font-semibold text-xl transition-all ${
-                  units === 'lbs'
-                    ? 'border-blue-600 bg-blue-600 text-white'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
-                }`}
-              >
-                Pounds (lbs)
-              </button>
-              <button
-                onClick={() => setUnits('kg')}
-                className={`flex-1 p-6 rounded-xl border-2 font-semibold text-xl transition-all ${
-                  units === 'kg'
-                    ? 'border-blue-600 bg-blue-600 text-white'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
-                }`}
-              >
-                Kilograms (kg)
-              </button>
-            </div>
-
-            <div className="mt-12 p-6 bg-blue-50 rounded-xl">
-              <h3 className="font-semibold text-lg mb-2">Your Summary</h3>
-              <ul className="space-y-2 text-gray-700">
-                <li><strong>Goals:</strong> {goals.join(', ') || 'None selected'}</li>
-                <li><strong>Limitations:</strong> {limitations.join(', ') || 'None'}</li>
-                <li><strong>Equipment:</strong> {equipment || 'Not selected'}</li>
-                <li><strong>Experience:</strong> {experience || 'Not selected'}</li>
-                <li><strong>Workout Days:</strong> {workoutDays.join(', ') || 'None selected'}</li>
-                <li><strong>Session Length:</strong> {sessionLength} minutes</li>
-              </ul>
-            </div>
-          </div>
-        )}
-
-        {/* Navigation Buttons */}
-        <div className="flex gap-4 mt-10">
-          {step > 1 && (
-            <button
-              onClick={handleBack}
-              className="flex-1 py-4 px-6 bg-gray-200 text-gray-700 rounded-xl font-semibold text-lg hover:bg-gray-300 transition-colors"
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              Back
-            </button>
+              <div
+                className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                  message.role === 'user'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white border border-gray-200 text-gray-800'
+                }`}
+              >
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-gray-500">
+                Thinking...
+              </div>
+            </div>
           )}
-          {step < totalSteps ? (
-            <button
-              onClick={handleNext}
-              disabled={!canProceed()}
-              className="flex-1 py-4 px-6 bg-blue-600 text-white rounded-xl font-semibold text-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Continue
-            </button>
-          ) : (
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Option Buttons */}
+        {suggestedOptions && !loading && (
+          <div className="px-4 pb-2">
+            <div className="flex flex-wrap gap-2 mb-2">
+              {suggestedOptions.options.map((option) => (
+                <button
+                  key={option.id}
+                  onClick={() => handleOptionClick(option.id)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                    selectedOptions.includes(option.id)
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white border border-gray-300 text-gray-700 hover:border-blue-400 hover:text-blue-600'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            {suggestedOptions.multiSelect && selectedOptions.length > 0 && (
+              <button
+                onClick={handleSendSelected}
+                className="w-full py-2 px-4 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors"
+              >
+                Send Selection ({selectedOptions.length})
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Mobile Complete Button */}
+        {readyToComplete && (
+          <div className="lg:hidden px-4 pb-2">
             <button
               onClick={handleComplete}
               disabled={saving}
-              className="flex-1 py-4 px-6 bg-green-600 text-white rounded-xl font-semibold text-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+              className="w-full py-3 px-4 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Complete Setup'}
             </button>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* Input Area */}
+        <form onSubmit={handleSubmit} className="p-4 bg-white border-t border-gray-200">
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Type your message..."
+              disabled={loading || readyToComplete}
+              className="flex-1 px-4 py-3 bg-gray-100 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || loading || readyToComplete}
+              className="px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Send
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

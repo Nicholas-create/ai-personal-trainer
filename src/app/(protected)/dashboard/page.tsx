@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { getActivePlan, getWorkouts } from '@/lib/firebase/firestore';
-import type { WorkoutPlan, TodayWorkout } from '@/types/plan';
+import { WorkoutPreviewModal } from '@/components/ui/WorkoutPreviewModal';
+import type { WorkoutPlan, TodayWorkout, DaySchedule } from '@/types/plan';
 import type { Workout } from '@/types/workout';
 import { format, startOfWeek, addDays, isToday, isSameDay } from 'date-fns';
 
@@ -17,6 +18,13 @@ export default function DashboardPage() {
   const [todayWorkout, setTodayWorkout] = useState<TodayWorkout | null>(null);
   const [loading, setLoading] = useState(true);
   const [streak, setStreak] = useState(0);
+  const [selectedDay, setSelectedDay] = useState<{
+    schedule: DaySchedule | null;
+    dayName: string;
+    dateDisplay: string;
+    isCompleted: boolean;
+    isToday: boolean;
+  } | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -94,11 +102,23 @@ export default function DashboardPage() {
       return {
         name: day,
         date: format(date, 'd'),
+        fullDate: date,
+        schedule: daySchedule || null,
         isToday: isToday(date),
         isRest: daySchedule?.workoutType === 'rest',
         isCompleted: !!completedWorkout,
         workoutType: daySchedule?.workoutName || '',
       };
+    });
+  };
+
+  const handleDayClick = (day: ReturnType<typeof getWeekDays>[0]) => {
+    setSelectedDay({
+      schedule: day.schedule,
+      dayName: format(day.fullDate, 'EEEE'),
+      dateDisplay: format(day.fullDate, 'MMMM d'),
+      isCompleted: day.isCompleted,
+      isToday: day.isToday,
     });
   };
 
@@ -233,10 +253,14 @@ export default function DashboardPage() {
         <div className="bg-white rounded-2xl p-4 lg:p-4 shadow-sm">
           <div className="grid grid-cols-7 gap-2">
             {getWeekDays().map((day) => (
-              <div key={day.name} className="text-center">
+              <button
+                key={day.name}
+                onClick={() => handleDayClick(day)}
+                className="text-center group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded-xl p-1 -m-1"
+              >
                 <p className="text-xs text-gray-500 mb-1">{day.name}</p>
                 <div
-                  className={`w-10 h-10 lg:w-9 lg:h-9 mx-auto rounded-full flex items-center justify-center text-sm font-semibold mb-1 ${
+                  className={`w-10 h-10 lg:w-9 lg:h-9 mx-auto rounded-full flex items-center justify-center text-sm font-semibold mb-1 transition-transform group-hover:scale-110 ${
                     day.isToday
                       ? 'bg-blue-600 text-white'
                       : day.isCompleted
@@ -251,43 +275,21 @@ export default function DashboardPage() {
                 <p className="text-xs text-gray-500 truncate">
                   {day.isRest ? 'Rest' : day.workoutType || '—'}
                 </p>
-              </div>
+              </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Link
-          href="/coach"
-          className="bg-white rounded-xl p-4 lg:p-3 shadow-sm hover:shadow-md transition-shadow text-center"
-        >
-          <span className="text-2xl mb-1 block">💬</span>
-          <span className="font-semibold text-gray-900 text-sm">Ask AI Coach</span>
-        </Link>
-        <Link
-          href="/history"
-          className="bg-white rounded-xl p-4 lg:p-3 shadow-sm hover:shadow-md transition-shadow text-center"
-        >
-          <span className="text-2xl mb-1 block">📅</span>
-          <span className="font-semibold text-gray-900 text-sm">View History</span>
-        </Link>
-        <Link
-          href="/profile"
-          className="bg-white rounded-xl p-4 lg:p-3 shadow-sm hover:shadow-md transition-shadow text-center"
-        >
-          <span className="text-2xl mb-1 block">⚙️</span>
-          <span className="font-semibold text-gray-900 text-sm">Settings</span>
-        </Link>
-        <Link
-          href="/workout"
-          className="bg-white rounded-xl p-4 lg:p-3 shadow-sm hover:shadow-md transition-shadow text-center"
-        >
-          <span className="text-2xl mb-1 block">🏋️</span>
-          <span className="font-semibold text-gray-900 text-sm">Quick Workout</span>
-        </Link>
-      </div>
+      <WorkoutPreviewModal
+        isOpen={selectedDay !== null}
+        onClose={() => setSelectedDay(null)}
+        schedule={selectedDay?.schedule ?? null}
+        dayName={selectedDay?.dayName ?? ''}
+        dateDisplay={selectedDay?.dateDisplay ?? ''}
+        isCompleted={selectedDay?.isCompleted ?? false}
+        isToday={selectedDay?.isToday ?? false}
+      />
     </div>
   );
 }

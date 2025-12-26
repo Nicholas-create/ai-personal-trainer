@@ -2,11 +2,31 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import {
+  getActivePlan,
+  createPlan,
+  updateDayInPlan,
+  updateExerciseInPlan,
+  getExerciseLibrary,
+  searchExercises,
+  createExercise,
+  getExerciseByName,
+} from '@/lib/firebase/firestore';
+import type { WorkoutPlan, DaySchedule, PlanExercise } from '@/types/plan';
+import type { LibraryExercise, NewExercise, ExerciseFilters, MuscleGroup, EquipmentType, DifficultyLevel } from '@/types/exercise';
+import { ConfirmPauseModal } from '@/components/ui/ConfirmPauseModal';
+import { MarkdownMessage } from '@/components/chat/MarkdownMessage';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  planUpdated?: boolean;
+}
+
+interface ToolAction {
+  tool: string;
+  data: unknown;
 }
 
 const QUICK_ACTIONS = [
@@ -27,6 +47,10 @@ export default function CoachPage() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [activePlan, setActivePlan] = useState<WorkoutPlan | null>(null);
+  const [exerciseLibrary, setExerciseLibrary] = useState<LibraryExercise[]>([]);
+  const [showPauseConfirmation, setShowPauseConfirmation] = useState(false);
+  const [pendingPlanData, setPendingPlanData] = useState<DaySchedule[] | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -36,6 +60,159 @@ export default function CoachPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Load active plan and exercise library on mount
+  useEffect(() => {
+    async function loadData() {
+      if (user?.uid) {
+        try {
+          const [plan, exercises] = await Promise.all([
+            getActivePlan(user.uid),
+            getExerciseLibrary(user.uid),
+          ]);
+          setActivePlan(plan);
+          setExerciseLibrary(exercises);
+        } catch (error) {
+          console.error('Error loading data:', error);
+        }
+      }
+    }
+    loadData();
+  }, [user?.uid]);
+
+  // Build exercise library summary for API
+  const exerciseLibrarySummary = exerciseLibrary.length > 0
+    ? {
+        totalExercises: exerciseLibrary.length,
+        muscleGroups: [...new Set(exerciseLibrary.flatMap((e) => e.primaryMuscles))],
+        equipmentTypes: [...new Set(exerciseLibrary.flatMap((e) => e.equipmentRequired))],
+      }
+    : null;
+
+  const handleToolActions = async (toolActions: ToolAction[]): Promise<boolean> => {
+    if (!user?.uid || toolActions.length === 0) return false;
+
+    let planUpdated = false;
+
+    for (const action of toolActions) {
+      try {
+        switch (action.tool) {
+          case 'save_workout_plan': {
+            const { workoutSchedule } = action.data as { workoutSchedule: DaySchedule[] };
+
+            // If there's an active plan, show confirmation before creating new one
+            if (activePlan) {
+              setPendingPlanData(workoutSchedule);
+              setShowPauseConfirmation(true);
+              // Don't mark as updated yet - will be handled by confirmation
+              return false;
+            }
+
+            // No active plan, create directly
+            await createPlan(user.uid, {
+              generatedAt: new Date(),
+              generatedBy: 'claude',
+              active: true,
+              workoutSchedule,
+              validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+              name: `Program - ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+              status: 'active',
+            });
+            // Reload the active plan
+            const newPlan = await getActivePlan(user.uid);
+            setActivePlan(newPlan);
+            planUpdated = true;
+            break;
+          }
+
+          case 'update_day_schedule': {
+            if (!activePlan) break;
+            const { dayOfWeek, workoutType, workoutName, exercises } = action.data as {
+              dayOfWeek: string;
+              workoutType: string;
+              workoutName: string;
+              exercises: PlanExercise[];
+            };
+            await updateDayInPlan(user.uid, activePlan.id, dayOfWeek, {
+              workoutType,
+              workoutName,
+              exercises,
+            });
+            // Reload the active plan
+            const updatedPlan = await getActivePlan(user.uid);
+            setActivePlan(updatedPlan);
+            planUpdated = true;
+            break;
+          }
+
+          case 'update_exercise': {
+            if (!activePlan) break;
+            const { dayOfWeek, exerciseId, updates } = action.data as {
+              dayOfWeek: string;
+              exerciseId: string;
+              updates: Partial<PlanExercise>;
+            };
+            await updateExerciseInPlan(user.uid, activePlan.id, dayOfWeek, exerciseId, updates);
+            // Reload the active plan
+            const refreshedPlan = await getActivePlan(user.uid);
+            setActivePlan(refreshedPlan);
+            planUpdated = true;
+            break;
+          }
+
+          // Exercise Library Tools - these return data to the AI
+          case 'query_exercise_library': {
+            const filters = action.data as ExerciseFilters;
+            const results = await searchExercises(user.uid, filters);
+            // Store results for tool response (handled in API continuation)
+            console.log(`Found ${results.length} exercises matching query`);
+            break;
+          }
+
+          case 'add_exercise_to_library': {
+            const exerciseData = action.data as {
+              name: string;
+              primaryMuscles: MuscleGroup[];
+              secondaryMuscles?: MuscleGroup[];
+              equipmentRequired: EquipmentType[];
+              difficulty: DifficultyLevel;
+              instructions: string[];
+              tips?: string[];
+            };
+            const { secondaryMuscles, tips, ...requiredFields } = exerciseData;
+            const newExercise: NewExercise = {
+              ...requiredFields,
+              isCustom: true,
+              isDefault: false,
+              ...(secondaryMuscles && secondaryMuscles.length > 0 && { secondaryMuscles }),
+              ...(tips && tips.length > 0 && { tips }),
+            };
+            await createExercise(user.uid, newExercise);
+            // Reload exercise library
+            const updatedLibrary = await getExerciseLibrary(user.uid);
+            setExerciseLibrary(updatedLibrary);
+            console.log(`Added exercise: ${exerciseData.name}`);
+            break;
+          }
+
+          case 'get_exercise_details': {
+            const { exerciseName } = action.data as { exerciseName: string };
+            const exercise = await getExerciseByName(user.uid, exerciseName);
+            if (exercise) {
+              console.log(`Found exercise: ${exercise.name}`);
+            } else {
+              console.log(`Exercise not found: ${exerciseName}`);
+            }
+            break;
+          }
+        }
+      } catch (error) {
+        console.error(`Error executing tool ${action.tool}:`, error);
+      }
+    }
+
+    return planUpdated;
+  };
 
   const sendMessage = async (content: string) => {
     if (!content.trim() || loading) return;
@@ -60,17 +237,27 @@ export default function CoachPage() {
             content: m.content,
           })),
           userContext: user?.profile,
+          activePlanSchedule: activePlan?.workoutSchedule || null,
+          exerciseLibrarySummary,
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to get response');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('API Error:', response.status, errorData);
+        throw new Error(errorData.details || 'Failed to get response');
+      }
 
       const data = await response.json();
+
+      // Handle tool actions (save to Firestore)
+      const planUpdated = await handleToolActions(data.toolActions || []);
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: data.message,
+        planUpdated,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -97,6 +284,59 @@ export default function CoachPage() {
 
   const handleQuickAction = (prompt: string) => {
     sendMessage(prompt);
+  };
+
+  const handleConfirmCreatePlan = async () => {
+    if (!user?.uid || !pendingPlanData) return;
+
+    setLoading(true);
+    try {
+      await createPlan(user.uid, {
+        generatedAt: new Date(),
+        generatedBy: 'claude',
+        active: true,
+        workoutSchedule: pendingPlanData,
+        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        name: `Program - ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+        status: 'active',
+      });
+
+      const newPlan = await getActivePlan(user.uid);
+      setActivePlan(newPlan);
+
+      // Update the last assistant message to show plan was saved
+      setMessages((prev) => {
+        const updated = [...prev];
+        if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+          updated[updated.length - 1] = {
+            ...updated[updated.length - 1],
+            planUpdated: true,
+          };
+        }
+        return updated;
+      });
+    } catch (error) {
+      console.error('Error creating plan:', error);
+    } finally {
+      setLoading(false);
+      setShowPauseConfirmation(false);
+      setPendingPlanData(null);
+    }
+  };
+
+  const handleCancelCreatePlan = () => {
+    setShowPauseConfirmation(false);
+    setPendingPlanData(null);
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content:
+          'No problem! I kept your current program active. Let me know if you change your mind or want to make modifications to your existing program instead.',
+      },
+    ]);
   };
 
   return (
@@ -132,9 +372,18 @@ export default function CoachPage() {
                     : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
                 }`}
               >
-                <p className="text-base lg:text-lg whitespace-pre-wrap">
-                  {message.content}
-                </p>
+                {message.role === 'assistant' ? (
+                  <MarkdownMessage content={message.content} />
+                ) : (
+                  <p className="text-base lg:text-lg whitespace-pre-wrap">
+                    {message.content}
+                  </p>
+                )}
+                {message.planUpdated && (
+                  <div className="mt-2 pt-2 border-t border-green-200 text-sm text-green-600 flex items-center gap-1">
+                    <span>&#10003;</span> Plan saved to your account
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -239,6 +488,14 @@ export default function CoachPage() {
           ))}
         </div>
       </div>
+
+      <ConfirmPauseModal
+        isOpen={showPauseConfirmation}
+        onConfirm={handleConfirmCreatePlan}
+        onCancel={handleCancelCreatePlan}
+        currentProgramName={activePlan?.name || 'current program'}
+        loading={loading}
+      />
     </div>
   );
 }
