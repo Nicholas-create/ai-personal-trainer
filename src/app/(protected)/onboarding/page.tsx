@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { updateUserProfile } from '@/lib/firebase/firestore';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { logger } from '@/lib/logger';
 import type { UserProfile } from '@/types/user';
 import {
   OnboardingState,
@@ -99,9 +101,8 @@ export default function OnboardingPage() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/onboarding-chat', {
+      const response = await fetchWithAuth('/api/onboarding-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           collectedData: onboardingData,
@@ -110,7 +111,8 @@ export default function OnboardingPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get response');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to get response');
       }
 
       const data: OnboardingChatResponse = await response.json();
@@ -147,11 +149,14 @@ export default function OnboardingPage() {
       };
       setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
-      console.error('Chat error:', error);
+      logger.error('Chat error:', error);
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: "Sorry, I encountered an issue. Could you please try again?",
+        content: errMsg.includes('authenticated')
+          ? 'Your session has expired. Please refresh the page and try again.'
+          : 'Sorry, I encountered an issue. Could you please try again?',
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -211,7 +216,7 @@ export default function OnboardingPage() {
       await refreshUser();
       router.push('/dashboard');
     } catch (error) {
-      console.error('Error saving profile:', error);
+      logger.error('Error saving profile:', error);
       alert('Failed to save profile. Please try again.');
     } finally {
       setSaving(false);

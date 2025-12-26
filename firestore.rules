@@ -1,0 +1,33 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Secrets collection - COMPLETELY BLOCKED from client access
+    // Only accessible via Firebase Admin SDK (server-side)
+    match /secrets/{secretId} {
+      allow read, write: if false;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Users can only read/write their own data
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Plans subcollection
+      match /plans/{planId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Workouts subcollection
+      match /workouts/{workoutId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Exercises subcollection
+      match /exercises/{exerciseId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}

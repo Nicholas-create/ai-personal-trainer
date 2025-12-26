@@ -12,9 +12,13 @@ import {
   addDoc,
   Timestamp,
   serverTimestamp,
+  writeBatch,
+  limit as firestoreLimit,
+  runTransaction,
 } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { db } from './config';
+import { logger } from '@/lib/logger';
 import type { User, UserProfile } from '@/types/user';
 import type { Workout } from '@/types/workout';
 import type { WorkoutPlan, PlanStatus } from '@/types/plan';
@@ -78,16 +82,17 @@ export async function updateUserProfileField(
 // Workout operations
 export async function getWorkouts(
   userId: string,
-  limit: number = 30
+  limitCount: number = 30
 ): Promise<Workout[]> {
   const workoutsRef = collection(db, 'users', userId, 'workouts');
-  const q = query(workoutsRef, orderBy('date', 'desc'));
+  // Use Firestore's limit() instead of client-side slicing for efficiency
+  const q = query(workoutsRef, orderBy('date', 'desc'), firestoreLimit(limitCount));
   const querySnapshot = await getDocs(q);
 
-  return querySnapshot.docs.slice(0, limit).map((doc) => {
-    const data = doc.data();
+  return querySnapshot.docs.map((docSnap) => {
+    const data = docSnap.data();
     return {
-      id: doc.id,
+      id: docSnap.id,
       userId,
       ...data,
       date: data.date?.toDate() || new Date(),
@@ -167,30 +172,39 @@ export async function createPlan(
   userId: string,
   plan: Omit<WorkoutPlan, 'id' | 'userId'>
 ): Promise<string> {
-  // Deactivate existing plans
   const plansRef = collection(db, 'users', userId, 'plans');
-  const activeQuery = query(plansRef, where('active', '==', true));
-  const activePlans = await getDocs(activeQuery);
 
-  for (const docSnap of activePlans.docs) {
-    await updateDoc(docSnap.ref, {
-      active: false,
-      status: 'paused',
-      pausedAt: serverTimestamp(),
+  // Use transaction to ensure atomicity - prevents race conditions
+  // when multiple createPlan calls happen simultaneously
+  return await runTransaction(db, async (transaction) => {
+    // Query for active plans
+    const activeQuery = query(plansRef, where('active', '==', true));
+    const activePlans = await getDocs(activeQuery);
+
+    // Deactivate all existing active plans in the transaction
+    for (const docSnap of activePlans.docs) {
+      transaction.update(docSnap.ref, {
+        active: false,
+        status: 'paused',
+        pausedAt: serverTimestamp(),
+      });
+    }
+
+    // Create new plan document reference
+    const newPlanRef = doc(plansRef);
+
+    // Set the new plan in the transaction
+    transaction.set(newPlanRef, {
+      ...plan,
+      generatedAt: Timestamp.fromDate(plan.generatedAt),
+      validUntil: Timestamp.fromDate(plan.validUntil),
+      startedAt: serverTimestamp(),
+      status: 'active',
+      name: plan.name || getDefaultPlanName(plan.generatedAt),
     });
-  }
 
-  // Create new plan with new fields
-  const docRef = await addDoc(plansRef, {
-    ...plan,
-    generatedAt: Timestamp.fromDate(plan.generatedAt),
-    validUntil: Timestamp.fromDate(plan.validUntil),
-    startedAt: serverTimestamp(),
-    status: 'active',
-    name: plan.name || getDefaultPlanName(plan.generatedAt),
+    return newPlanRef.id;
   });
-
-  return docRef.id;
 }
 
 export async function updateDayInPlan(
@@ -289,49 +303,56 @@ export async function pausePlan(userId: string, planId: string): Promise<void> {
 
 // Resume a paused plan
 export async function resumePlan(userId: string, planId: string): Promise<void> {
-  // First, deactivate any other active plans
   const plansRef = collection(db, 'users', userId, 'plans');
-  const activeQuery = query(plansRef, where('active', '==', true));
-  const activePlans = await getDocs(activeQuery);
-
-  for (const docSnap of activePlans.docs) {
-    await updateDoc(docSnap.ref, {
-      status: 'paused',
-      active: false,
-      pausedAt: serverTimestamp(),
-    });
-  }
-
-  // Resume the target plan
   const planRef = doc(db, 'users', userId, 'plans', planId);
-  const planSnap = await getDoc(planRef);
 
-  if (!planSnap.exists()) {
-    throw new Error('Plan not found');
-  }
+  // Use transaction to ensure atomicity - prevents race conditions
+  await runTransaction(db, async (transaction) => {
+    // Get the target plan first
+    const planSnap = await transaction.get(planRef);
 
-  const planData = planSnap.data();
-  const validUntil = (planData.validUntil as Timestamp)?.toDate?.() || new Date();
-
-  // If plan is expired, auto-extend by 1 week
-  const updates: Record<string, unknown> = {
-    status: 'active',
-    active: true,
-    resumedAt: serverTimestamp(),
-    pausedAt: null,
-  };
-
-  if (validUntil < new Date()) {
-    const newValidUntil = new Date();
-    newValidUntil.setDate(newValidUntil.getDate() + 7);
-    updates.validUntil = Timestamp.fromDate(newValidUntil);
-    updates.extendedAt = serverTimestamp();
-    if (!planData.originalValidUntil) {
-      updates.originalValidUntil = planData.validUntil;
+    if (!planSnap.exists()) {
+      throw new Error('Plan not found');
     }
-  }
 
-  await updateDoc(planRef, updates);
+    // Query for active plans
+    const activeQuery = query(plansRef, where('active', '==', true));
+    const activePlans = await getDocs(activeQuery);
+
+    // Deactivate all other active plans in the transaction
+    for (const docSnap of activePlans.docs) {
+      if (docSnap.id !== planId) {
+        transaction.update(docSnap.ref, {
+          status: 'paused',
+          active: false,
+          pausedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    const planData = planSnap.data();
+    const validUntil = (planData.validUntil as Timestamp)?.toDate?.() || new Date();
+
+    // If plan is expired, auto-extend by 1 week
+    const updates: Record<string, unknown> = {
+      status: 'active',
+      active: true,
+      resumedAt: serverTimestamp(),
+      pausedAt: null,
+    };
+
+    if (validUntil < new Date()) {
+      const newValidUntil = new Date();
+      newValidUntil.setDate(newValidUntil.getDate() + 7);
+      updates.validUntil = Timestamp.fromDate(newValidUntil);
+      updates.extendedAt = serverTimestamp();
+      if (!planData.originalValidUntil) {
+        updates.originalValidUntil = planData.validUntil;
+      }
+    }
+
+    transaction.update(planRef, updates);
+  });
 }
 
 // Archive a plan
@@ -413,7 +434,7 @@ export async function getExerciseLibrary(userId: string): Promise<LibraryExercis
     // Sort by name client-side
     return exercises.sort((a, b) => a.name.localeCompare(b.name));
   } catch (error) {
-    console.error('Error fetching exercise library:', error);
+    logger.error('Error fetching exercise library:', error);
     return [];
   }
 }
@@ -511,7 +532,7 @@ export async function hasExerciseLibrary(userId: string): Promise<boolean> {
     const snapshot = await getDocs(exercisesRef);
     return !snapshot.empty;
   } catch (error) {
-    console.error('Error checking exercise library:', error);
+    logger.error('Error checking exercise library:', error);
     return false;
   }
 }
@@ -526,24 +547,26 @@ export async function initializeExerciseLibrary(userId: string): Promise<void> {
     // Import seed data dynamically to avoid bundling in every page
     const { DEFAULT_EXERCISES } = await import('@/data/defaultExercises');
 
-    // Add all default exercises
     const exercisesRef = collection(db, 'users', userId, 'exercises');
 
-    // Add exercises in smaller batches to avoid overwhelming Firestore
-    const batchSize = 20;
+    // Use Firestore batch writes for efficiency (max 500 operations per batch)
+    const batchSize = 500;
     for (let i = 0; i < DEFAULT_EXERCISES.length; i += batchSize) {
-      const batch = DEFAULT_EXERCISES.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map((exercise) =>
-          addDoc(exercisesRef, {
-            ...exercise,
-            createdAt: serverTimestamp(),
-          })
-        )
-      );
+      const batch = writeBatch(db);
+      const exercises = DEFAULT_EXERCISES.slice(i, i + batchSize);
+
+      for (const exercise of exercises) {
+        const docRef = doc(exercisesRef);
+        batch.set(docRef, {
+          ...exercise,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
     }
   } catch (error) {
-    console.error('Error initializing exercise library:', error);
+    logger.error('Error initializing exercise library:', error);
     throw error;
   }
 }

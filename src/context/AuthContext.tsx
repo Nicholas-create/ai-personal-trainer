@@ -10,7 +10,27 @@ import {
 import { User as FirebaseUser } from 'firebase/auth';
 import { onAuthChange, signInWithGoogle, signOut } from '@/lib/firebase/auth';
 import { getUser, createUser } from '@/lib/firebase/firestore';
+import { logger } from '@/lib/logger';
 import type { User } from '@/types/user';
+
+// Cookie helpers for middleware auth detection
+// Uses server-side API route to set HttpOnly cookies for security
+// This prevents XSS attacks from accessing the auth cookie
+async function setAuthCookie(): Promise<void> {
+  try {
+    await fetch('/api/auth/session', { method: 'POST' });
+  } catch {
+    // Silently fail - auth will still work client-side via Firebase
+  }
+}
+
+async function clearAuthCookie(): Promise<void> {
+  try {
+    await fetch('/api/auth/session', { method: 'DELETE' });
+  } catch {
+    // Silently fail
+  }
+}
 
 interface AuthContextType {
   firebaseUser: FirebaseUser | null;
@@ -49,8 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFirebaseUser(fbUser);
 
       if (fbUser) {
+        // Set auth cookie for middleware detection (HttpOnly via server)
+        await setAuthCookie();
         await loadUser(fbUser);
       } else {
+        await clearAuthCookie();
         setUser(null);
       }
 
@@ -66,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const fbUser = await signInWithGoogle();
       await loadUser(fbUser);
     } catch (error) {
-      console.error('Sign in error:', error);
+      logger.error('Sign in error:', error);
       throw error;
     } finally {
       setLoading(false);
@@ -75,10 +98,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const handleSignOut = async () => {
     try {
+      await clearAuthCookie();
       await signOut();
       setUser(null);
     } catch (error) {
-      console.error('Sign out error:', error);
+      logger.error('Sign out error:', error);
       throw error;
     }
   };

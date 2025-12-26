@@ -1,13 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { withAuth } from '@/lib/auth/verifyAuth';
+import { getAnthropicApiKey } from '@/lib/secrets/firestoreSecrets';
+import { logger } from '@/lib/logger';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Lazy-initialized Anthropic client
+let anthropicClient: Anthropic | null = null;
 
-export async function POST(request: NextRequest) {
+async function getAnthropicClient(): Promise<Anthropic> {
+  if (!anthropicClient) {
+    const apiKey = await getAnthropicApiKey();
+    anthropicClient = new Anthropic({ apiKey });
+  }
+  return anthropicClient;
+}
+
+async function handleGeneratePlan(
+  request: NextRequest,
+  { userId }: { userId: string }
+) {
   try {
     const { userProfile } = await request.json();
+
+    logger.log('Generate plan request from user:', userId);
 
     const systemPrompt = `You are an AI personal trainer creating a weekly workout plan. Generate a structured workout schedule based on the user's profile.
 
@@ -51,6 +66,7 @@ Rules:
 8. Keep exercises appropriate for 60+ users (safe, effective)
 9. Each exercise needs: id (string), name, sets (number), reps (number), and optional notes`;
 
+    const anthropic = await getAnthropicClient();
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
@@ -78,8 +94,8 @@ Rules:
         throw new Error('No JSON found in response');
       }
     } catch (parseError) {
-      console.error('Failed to parse AI response:', parseError);
-      console.error('Response was:', responseText);
+      logger.error('Failed to parse AI response:', parseError);
+      logger.error('Response was:', responseText);
       return NextResponse.json(
         { error: 'Failed to parse workout plan' },
         { status: 500 }
@@ -88,10 +104,13 @@ Rules:
 
     return NextResponse.json(workoutPlan);
   } catch (error) {
-    console.error('Generate plan API error:', error);
+    logger.error('Generate plan API error:', error);
     return NextResponse.json(
       { error: 'Failed to generate workout plan' },
       { status: 500 }
     );
   }
 }
+
+// Export POST handler wrapped with authentication
+export const POST = withAuth(handleGeneratePlan);

@@ -3,7 +3,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
   OnboardingState,
   OnboardingChatResponse,
-  isOnboardingComplete,
   GOAL_OPTIONS,
   LIMITATION_OPTIONS,
   EQUIPMENT_OPTIONS,
@@ -19,10 +18,20 @@ import {
   VALID_SESSION_LENGTHS,
   VALID_UNITS,
 } from '@/types/onboarding';
+import { withAuth } from '@/lib/auth/verifyAuth';
+import { getAnthropicApiKey } from '@/lib/secrets/firestoreSecrets';
+import { logger } from '@/lib/logger';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Lazy-initialized Anthropic client
+let anthropicClient: Anthropic | null = null;
+
+async function getAnthropicClient(): Promise<Anthropic> {
+  if (!anthropicClient) {
+    const apiKey = await getAnthropicApiKey();
+    anthropicClient = new Anthropic({ apiKey });
+  }
+  return anthropicClient;
+}
 
 function formatCollectedData(data: OnboardingState): string {
   const fields = [];
@@ -253,12 +262,18 @@ function getOptionsForField(field: keyof OnboardingState): { id: string; label: 
   }
 }
 
-export async function POST(request: NextRequest) {
+async function handleOnboardingChat(
+  request: NextRequest,
+  { userId }: { userId: string }
+) {
   try {
     const { messages, collectedData, userConfirmed = false } = await request.json();
 
+    logger.log('Onboarding chat request from user:', userId);
+
     const systemPrompt = buildSystemPrompt(collectedData || {}, userConfirmed);
 
+    const anthropic = await getAnthropicClient();
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
@@ -361,10 +376,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error('Onboarding chat API error:', error);
+    logger.error('Onboarding chat API error:', error);
     return NextResponse.json(
       { error: 'Failed to get response from AI' },
       { status: 500 }
     );
   }
 }
+
+// Export POST handler wrapped with authentication
+export const POST = withAuth(handleOnboardingChat);

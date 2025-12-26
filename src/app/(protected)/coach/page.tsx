@@ -1,21 +1,23 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   getActivePlan,
-  createPlan,
   updateDayInPlan,
   updateExerciseInPlan,
   getExerciseLibrary,
-  searchExercises,
   createExercise,
   getExerciseByName,
+  searchExercises,
 } from '@/lib/firebase/firestore';
-import type { WorkoutPlan, DaySchedule, PlanExercise } from '@/types/plan';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { usePlanManagement } from '@/hooks/usePlanManagement';
+import type { DaySchedule, PlanExercise } from '@/types/plan';
 import type { LibraryExercise, NewExercise, ExerciseFilters, MuscleGroup, EquipmentType, DifficultyLevel } from '@/types/exercise';
 import { ConfirmPauseModal } from '@/components/ui/ConfirmPauseModal';
 import { MarkdownMessage } from '@/components/chat/MarkdownMessage';
+import { logger } from '@/lib/logger';
 
 interface Message {
   id: string;
@@ -38,6 +40,16 @@ const QUICK_ACTIONS = [
 
 export default function CoachPage() {
   const { user } = useAuth();
+
+  // Plan management hook
+  const {
+    activePlan,
+    setActivePlan,
+    isCreatingPlan,
+    createNewPlan,
+    loadActivePlan,
+  } = usePlanManagement({ userId: user?.uid });
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -47,7 +59,6 @@ export default function CoachPage() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activePlan, setActivePlan] = useState<WorkoutPlan | null>(null);
   const [exerciseLibrary, setExerciseLibrary] = useState<LibraryExercise[]>([]);
   const [showPauseConfirmation, setShowPauseConfirmation] = useState(false);
   const [pendingPlanData, setPendingPlanData] = useState<DaySchedule[] | null>(null);
@@ -66,30 +77,42 @@ export default function CoachPage() {
     async function loadData() {
       if (user?.uid) {
         try {
-          const [plan, exercises] = await Promise.all([
-            getActivePlan(user.uid),
-            getExerciseLibrary(user.uid),
-          ]);
-          setActivePlan(plan);
+          await loadActivePlan();
+          const exercises = await getExerciseLibrary(user.uid);
           setExerciseLibrary(exercises);
         } catch (error) {
-          console.error('Error loading data:', error);
+          logger.error('Error loading data:', error);
         }
       }
     }
     loadData();
-  }, [user?.uid]);
+  }, [user?.uid, loadActivePlan]);
 
-  // Build exercise library summary for API
-  const exerciseLibrarySummary = exerciseLibrary.length > 0
-    ? {
-        totalExercises: exerciseLibrary.length,
-        muscleGroups: [...new Set(exerciseLibrary.flatMap((e) => e.primaryMuscles))],
-        equipmentTypes: [...new Set(exerciseLibrary.flatMap((e) => e.equipmentRequired))],
-      }
-    : null;
+  // Memoize exercise library summary for API
+  const exerciseLibrarySummary = useMemo(() => {
+    if (exerciseLibrary.length === 0) return null;
+    return {
+      totalExercises: exerciseLibrary.length,
+      muscleGroups: [...new Set(exerciseLibrary.flatMap((e) => e.primaryMuscles))],
+      equipmentTypes: [...new Set(exerciseLibrary.flatMap((e) => e.equipmentRequired))],
+    };
+  }, [exerciseLibrary]);
 
-  const handleToolActions = async (toolActions: ToolAction[]): Promise<boolean> => {
+  // Memoize exercise library data for server-side query tools
+  const exerciseLibraryForQuery = useMemo(() => {
+    return exerciseLibrary.map((ex) => ({
+      id: ex.id,
+      name: ex.name,
+      primaryMuscles: ex.primaryMuscles,
+      secondaryMuscles: ex.secondaryMuscles,
+      equipmentRequired: ex.equipmentRequired,
+      difficulty: ex.difficulty,
+      instructions: ex.instructions,
+      tips: ex.tips,
+    }));
+  }, [exerciseLibrary]);
+
+  const handleToolActions = useCallback(async (toolActions: ToolAction[]): Promise<boolean> => {
     if (!user?.uid || toolActions.length === 0) return false;
 
     let planUpdated = false;
@@ -108,20 +131,9 @@ export default function CoachPage() {
               return false;
             }
 
-            // No active plan, create directly
-            await createPlan(user.uid, {
-              generatedAt: new Date(),
-              generatedBy: 'claude',
-              active: true,
-              workoutSchedule,
-              validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-              name: `Program - ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
-              status: 'active',
-            });
-            // Reload the active plan
-            const newPlan = await getActivePlan(user.uid);
-            setActivePlan(newPlan);
-            planUpdated = true;
+            // No active plan, create directly using the hook
+            const success = await createNewPlan(workoutSchedule);
+            planUpdated = success;
             break;
           }
 
@@ -207,12 +219,12 @@ export default function CoachPage() {
           }
         }
       } catch (error) {
-        console.error(`Error executing tool ${action.tool}:`, error);
+        logger.error(`Error executing tool ${action.tool}:`, error);
       }
     }
 
     return planUpdated;
-  };
+  }, [user?.uid, activePlan, createNewPlan, setActivePlan, exerciseLibrary]);
 
   const sendMessage = async (content: string) => {
     if (!content.trim() || loading) return;
@@ -228,9 +240,8 @@ export default function CoachPage() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetchWithAuth('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [...messages, userMessage].map((m) => ({
             role: m.role,
@@ -239,13 +250,14 @@ export default function CoachPage() {
           userContext: user?.profile,
           activePlanSchedule: activePlan?.workoutSchedule || null,
           exerciseLibrarySummary,
+          exerciseLibrary: exerciseLibraryForQuery,
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('API Error:', response.status, errorData);
-        throw new Error(errorData.details || 'Failed to get response');
+        logger.error('API Error:', response.status, errorData);
+        throw new Error(errorData.details || errorData.error || 'Failed to get response');
       }
 
       const data = await response.json();
@@ -262,14 +274,16 @@ export default function CoachPage() {
 
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
-      console.error('Chat error:', error);
+      logger.error('Chat error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setMessages((prev) => [
         ...prev,
         {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content:
-            'Sorry, I encountered an error. Please try again in a moment.',
+          content: errorMessage.includes('authenticated')
+            ? 'Your session has expired. Please refresh the page and try again.'
+            : 'Sorry, I encountered an error. Please try again in a moment.',
         },
       ]);
     } finally {
@@ -291,32 +305,23 @@ export default function CoachPage() {
 
     setLoading(true);
     try {
-      await createPlan(user.uid, {
-        generatedAt: new Date(),
-        generatedBy: 'claude',
-        active: true,
-        workoutSchedule: pendingPlanData,
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        name: `Program - ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
-        status: 'active',
-      });
+      const success = await createNewPlan(pendingPlanData);
 
-      const newPlan = await getActivePlan(user.uid);
-      setActivePlan(newPlan);
-
-      // Update the last assistant message to show plan was saved
-      setMessages((prev) => {
-        const updated = [...prev];
-        if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
-          updated[updated.length - 1] = {
-            ...updated[updated.length - 1],
-            planUpdated: true,
-          };
-        }
-        return updated;
-      });
+      if (success) {
+        // Update the last assistant message to show plan was saved
+        setMessages((prev) => {
+          const updated = [...prev];
+          if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              planUpdated: true,
+            };
+          }
+          return updated;
+        });
+      }
     } catch (error) {
-      console.error('Error creating plan:', error);
+      logger.error('Error creating plan:', error);
     } finally {
       setLoading(false);
       setShowPauseConfirmation(false);
@@ -494,7 +499,7 @@ export default function CoachPage() {
         onConfirm={handleConfirmCreatePlan}
         onCancel={handleCancelCreatePlan}
         currentProgramName={activePlan?.name || 'current program'}
-        loading={loading}
+        loading={loading || isCreatingPlan}
       />
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Dialog, DialogPanel, DialogTitle, DialogBackdrop } from '@headlessui/react';
+import { logger } from '@/lib/logger';
 import type { NewExercise, MuscleGroup, EquipmentType, DifficultyLevel } from '@/types/exercise';
 import {
   MUSCLE_GROUP_OPTIONS,
@@ -24,6 +25,7 @@ const difficultyColors = {
 export function CreateExerciseModal({ isOpen, onClose, onSave }: CreateExerciseModalProps) {
   const [saving, setSaving] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
 
   // Form state
   const [name, setName] = useState('');
@@ -42,6 +44,7 @@ export function CreateExerciseModal({ isOpen, onClose, onSave }: CreateExerciseM
     setDifficulty('beginner');
     setInstructions(['']);
     setTips([]);
+    setShowValidation(false);
   };
 
   const hasContent = () => {
@@ -102,7 +105,7 @@ export function CreateExerciseModal({ isOpen, onClose, onSave }: CreateExerciseM
       resetForm();
       onClose();
     } catch (error) {
-      console.error('Error creating exercise:', error);
+      logger.error('Error creating exercise:', error);
     } finally {
       setSaving(false);
     }
@@ -164,11 +167,26 @@ export function CreateExerciseModal({ isOpen, onClose, onSave }: CreateExerciseM
     setTips(tips.filter((_, i) => i !== index));
   };
 
-  const isValid =
-    name.trim() &&
-    primaryMuscles.length > 0 &&
-    equipmentRequired.length > 0 &&
-    instructions.some((i) => i.trim());
+  // Validation
+  const validation = {
+    name: name.trim().length > 0,
+    primaryMuscles: primaryMuscles.length > 0,
+    equipmentRequired: equipmentRequired.length > 0,
+    instructions: instructions.some((i) => i.trim()),
+  };
+
+  const isValid = Object.values(validation).every(Boolean);
+
+  const getValidationMessage = () => {
+    if (!showValidation) return null;
+    const missing: string[] = [];
+    if (!validation.name) missing.push('name');
+    if (!validation.primaryMuscles) missing.push('primary muscles');
+    if (!validation.equipmentRequired) missing.push('equipment');
+    if (!validation.instructions) missing.push('at least one instruction');
+    if (missing.length === 0) return null;
+    return `Please add: ${missing.join(', ')}`;
+  };
 
   return (
     <Dialog open={isOpen} onClose={handleClose} className="relative z-50">
@@ -407,10 +425,21 @@ export function CreateExerciseModal({ isOpen, onClose, onSave }: CreateExerciseM
 
           {/* Footer */}
           <div className="p-6 pt-4 border-t border-gray-100">
+            {/* Validation message */}
+            {showValidation && !isValid && (
+              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-600">{getValidationMessage()}</p>
+              </div>
+            )}
             <div className="flex gap-3">
               <button
-                onClick={handleSave}
-                disabled={saving || !isValid}
+                onClick={() => {
+                  setShowValidation(true);
+                  if (isValid) {
+                    handleSave();
+                  }
+                }}
+                disabled={saving}
                 className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {saving ? 'Creating...' : 'Create Exercise'}

@@ -7,7 +7,8 @@ import { getActivePlan, getWorkouts } from '@/lib/firebase/firestore';
 import { WorkoutPreviewModal } from '@/components/ui/WorkoutPreviewModal';
 import type { WorkoutPlan, TodayWorkout, DaySchedule } from '@/types/plan';
 import type { Workout } from '@/types/workout';
-import { format, startOfWeek, addDays, isToday, isSameDay } from 'date-fns';
+import { format, startOfWeek, addDays, isToday, isSameDay, subDays } from 'date-fns';
+import { logger } from '@/lib/logger';
 
 const DAYS_OF_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -17,6 +18,7 @@ export default function DashboardPage() {
   const [recentWorkouts, setRecentWorkouts] = useState<Workout[]>([]);
   const [todayWorkout, setTodayWorkout] = useState<TodayWorkout | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
   const [selectedDay, setSelectedDay] = useState<{
     schedule: DaySchedule | null;
@@ -26,58 +28,91 @@ export default function DashboardPage() {
     isToday: boolean;
   } | null>(null);
 
-  useEffect(() => {
-    async function loadData() {
-      if (!user) return;
+  // Calculate streak accounting for scheduled rest days
+  const calculateStreak = (
+    workouts: Workout[],
+    activePlan: WorkoutPlan | null
+  ): number => {
+    if (!activePlan) return 0;
 
-      try {
-        const [activePlan, workouts] = await Promise.all([
-          getActivePlan(user.uid),
-          getWorkouts(user.uid, 30),
-        ]);
+    // Get scheduled workout days from plan
+    const scheduledWorkoutDays = new Set(
+      activePlan.workoutSchedule
+        .filter((s) => s.workoutType !== 'rest')
+        .map((s) => s.dayOfWeek.toLowerCase())
+    );
 
-        setPlan(activePlan);
-        setRecentWorkouts(workouts);
+    let currentStreak = 0;
+    const today = new Date();
 
-        // Calculate streak
-        let currentStreak = 0;
-        const today = new Date();
-        for (let i = 0; i < workouts.length; i++) {
-          const workoutDate = new Date(workouts[i].date);
-          const expectedDate = new Date(today);
-          expectedDate.setDate(today.getDate() - i);
+    // Check up to 30 days back
+    for (let daysBack = 0; daysBack <= 30; daysBack++) {
+      const checkDate = subDays(today, daysBack);
+      const dayName = format(checkDate, 'EEEE').toLowerCase();
 
-          if (isSameDay(workoutDate, expectedDate) && workouts[i].completed) {
-            currentStreak++;
-          } else {
-            break;
-          }
-        }
-        setStreak(currentStreak);
-
-        // Get today's workout from the plan
-        if (activePlan) {
-          const today = format(new Date(), 'EEEE').toLowerCase();
-          const todaySchedule = activePlan.workoutSchedule.find(
-            (s) => s.dayOfWeek.toLowerCase() === today
-          );
-
-          if (todaySchedule) {
-            setTodayWorkout({
-              name: todaySchedule.workoutName,
-              exercises: todaySchedule.exercises,
-              estimatedDuration: user.profile?.sessionLength || 45,
-              isRestDay: todaySchedule.workoutType === 'rest',
-            });
-          }
-        }
-      } catch (error) {
-        console.error('Error loading dashboard data:', error);
-      } finally {
-        setLoading(false);
+      // Skip if it's a scheduled rest day
+      if (!scheduledWorkoutDays.has(dayName)) {
+        continue;
       }
+
+      // Check if there's a completed workout on this scheduled workout day
+      const workoutOnDay = workouts.find(
+        (w) => isSameDay(new Date(w.date), checkDate) && w.completed
+      );
+
+      if (workoutOnDay) {
+        currentStreak++;
+      } else if (daysBack > 0) {
+        // If no workout on a scheduled day (and it's not today), break streak
+        break;
+      }
+      // If today is a scheduled day with no workout yet, don't break streak
     }
 
+    return currentStreak;
+  };
+
+  const loadData = async () => {
+    if (!user) return;
+
+    setError(null);
+    try {
+      const [activePlan, workouts] = await Promise.all([
+        getActivePlan(user.uid),
+        getWorkouts(user.uid, 30),
+      ]);
+
+      setPlan(activePlan);
+      setRecentWorkouts(workouts);
+
+      // Calculate streak accounting for rest days
+      setStreak(calculateStreak(workouts, activePlan));
+
+      // Get today's workout from the plan
+      if (activePlan) {
+        const today = format(new Date(), 'EEEE').toLowerCase();
+        const todaySchedule = activePlan.workoutSchedule.find(
+          (s) => s.dayOfWeek.toLowerCase() === today
+        );
+
+        if (todaySchedule) {
+          setTodayWorkout({
+            name: todaySchedule.workoutName,
+            exercises: todaySchedule.exercises,
+            estimatedDuration: user.profile?.sessionLength || 45,
+            isRestDay: todaySchedule.workoutType === 'rest',
+          });
+        }
+      }
+    } catch (err) {
+      logger.error('Error loading dashboard data:', err);
+      setError('Failed to load dashboard data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     loadData();
   }, [user]);
 
@@ -126,6 +161,29 @@ export default function DashboardPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="spinner" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+        <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
+          <span className="text-6xl mb-4 block">⚠️</span>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            Something went wrong
+          </h2>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <button
+            onClick={() => {
+              setLoading(true);
+              loadData();
+            }}
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
       </div>
     );
   }

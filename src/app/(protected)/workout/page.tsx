@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { getActivePlan, createWorkout, updateWorkout } from '@/lib/firebase/firestore';
+import { withRetry } from '@/lib/firebase/firestoreRetry';
 import type { WorkoutPlan, PlanExercise } from '@/types/plan';
-import type { Exercise, Workout, CompletedSet } from '@/types/workout';
+import type { Exercise, CompletedSet } from '@/types/workout';
 import { format } from 'date-fns';
+import { logger } from '@/lib/logger';
 import Stepper from '@/components/ui/Stepper';
 import WeightChips from '@/components/ui/WeightChips';
 
@@ -20,6 +22,7 @@ export default function WorkoutPage() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [workoutId, setWorkoutId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [startTime] = useState(new Date());
 
@@ -27,6 +30,7 @@ export default function WorkoutPage() {
     async function loadPlan() {
       if (!user) return;
 
+      setError(null);
       try {
         const activePlan = await getActivePlan(user.uid);
         setPlan(activePlan);
@@ -73,8 +77,9 @@ export default function WorkoutPage() {
             setWorkoutId(id);
           }
         }
-      } catch (error) {
-        console.error('Error loading plan:', error);
+      } catch (err) {
+        logger.error('Error loading plan:', err);
+        setError('Failed to load workout. Please try again.');
       } finally {
         setLoading(false);
       }
@@ -83,7 +88,8 @@ export default function WorkoutPage() {
     loadPlan();
   }, [user]);
 
-  const currentExercise = exercises[currentExerciseIndex];
+  // Safely get current exercise with null check
+  const currentExercise = exercises.length > 0 ? exercises[currentExerciseIndex] : null;
   const currentSetIndex = currentExercise?.completedSets.findIndex(
     (s) => !s.completed
   );
@@ -102,10 +108,14 @@ export default function WorkoutPage() {
     });
   };
 
-  const completeSet = async (setIndex: number) => {
-    updateSet(setIndex, { completed: true });
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-    // Save to Firestore
+  const completeSet = async (setIndex: number) => {
+    // Optimistic update
+    updateSet(setIndex, { completed: true });
+    setSaveError(null);
+
+    // Save to Firestore with retry
     if (workoutId && user) {
       const updatedExercises = [...exercises];
       updatedExercises[currentExerciseIndex].completedSets[setIndex].completed =
@@ -113,11 +123,16 @@ export default function WorkoutPage() {
 
       try {
         setSaving(true);
-        await updateWorkout(user.uid, workoutId, {
-          exercises: updatedExercises,
-        });
+        await withRetry(() =>
+          updateWorkout(user.uid, workoutId, {
+            exercises: updatedExercises,
+          })
+        );
       } catch (error) {
-        console.error('Error saving set:', error);
+        logger.error('Error saving set:', error);
+        setSaveError('Failed to save. Your progress will be saved when connection is restored.');
+        // Revert optimistic update on failure
+        updateSet(setIndex, { completed: false });
       } finally {
         setSaving(false);
       }
@@ -145,14 +160,18 @@ export default function WorkoutPage() {
 
     try {
       setSaving(true);
-      await updateWorkout(user.uid, workoutId, {
-        completed: true,
-        duration,
-        exercises,
-      });
+      setSaveError(null);
+      await withRetry(() =>
+        updateWorkout(user.uid, workoutId, {
+          completed: true,
+          duration,
+          exercises,
+        })
+      );
       router.push('/dashboard');
     } catch (error) {
-      console.error('Error finishing workout:', error);
+      logger.error('Error finishing workout:', error);
+      setSaveError('Failed to save workout. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -167,6 +186,26 @@ export default function WorkoutPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="spinner" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+        <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
+          <span className="text-6xl mb-4 block">⚠️</span>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            Something went wrong
+          </h2>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+          >
+            Back to Dashboard
+          </button>
+        </div>
       </div>
     );
   }
@@ -208,7 +247,7 @@ export default function WorkoutPage() {
             </button>
             <h2 className="font-bold text-lg">{workoutName}</h2>
             <span className="text-gray-500">
-              {saving ? 'Saving...' : ''}
+              {saving ? 'Saving...' : saveError ? '' : ''}
             </span>
           </div>
           <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -222,6 +261,22 @@ export default function WorkoutPage() {
           </p>
         </div>
       </div>
+
+      {/* Error Alert */}
+      {saveError && (
+        <div className="bg-yellow-50 border-b border-yellow-200 p-3">
+          <div className="max-w-4xl mx-auto flex items-center gap-2 text-yellow-800 text-sm">
+            <span>⚠️</span>
+            <span>{saveError}</span>
+            <button
+              onClick={() => setSaveError(null)}
+              className="ml-auto text-yellow-600 hover:text-yellow-800"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-6xl mx-auto p-6 lg:p-8">
         <div className="grid lg:grid-cols-3 gap-6">

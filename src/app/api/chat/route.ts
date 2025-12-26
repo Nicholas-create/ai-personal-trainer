@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import type { DaySchedule } from '@/types/plan';
+import { withAuth } from '@/lib/auth/verifyAuth';
+import { getAnthropicApiKey } from '@/lib/secrets/firestoreSecrets';
+import { logger } from '@/lib/logger';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Lazy-initialized Anthropic client (fetches API key from Firestore on first use)
+let anthropicClient: Anthropic | null = null;
+
+async function getAnthropicClient(): Promise<Anthropic> {
+  if (!anthropicClient) {
+    const apiKey = await getAnthropicApiKey();
+    anthropicClient = new Anthropic({ apiKey });
+  }
+  return anthropicClient;
+}
 
 const tools: Anthropic.Tool[] = [
   {
@@ -320,6 +330,125 @@ interface ExerciseLibrarySummary {
   equipmentTypes: string[];
 }
 
+// Exercise data passed from client for server-side queries
+interface ExerciseData {
+  id: string;
+  name: string;
+  primaryMuscles: string[];
+  secondaryMuscles?: string[];
+  equipmentRequired: string[];
+  difficulty: string;
+  instructions: string[];
+  tips?: string[];
+}
+
+// Query tools that need to be executed server-side
+const QUERY_TOOLS = ['query_exercise_library', 'get_exercise_details'];
+
+// Execute query tools server-side and return results
+function executeQueryTool(
+  toolName: string,
+  input: Record<string, unknown>,
+  exerciseLibrary: ExerciseData[]
+): string {
+  switch (toolName) {
+    case 'query_exercise_library': {
+      const { muscleGroup, equipment, difficulty, searchTerm } = input as {
+        muscleGroup?: string;
+        equipment?: string;
+        difficulty?: string;
+        searchTerm?: string;
+      };
+
+      let results = [...exerciseLibrary];
+
+      if (muscleGroup) {
+        results = results.filter(
+          (ex) =>
+            ex.primaryMuscles.includes(muscleGroup) ||
+            ex.secondaryMuscles?.includes(muscleGroup)
+        );
+      }
+
+      if (equipment) {
+        results = results.filter((ex) =>
+          ex.equipmentRequired.includes(equipment)
+        );
+      }
+
+      if (difficulty) {
+        results = results.filter((ex) => ex.difficulty === difficulty);
+      }
+
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        results = results.filter((ex) =>
+          ex.name.toLowerCase().includes(term)
+        );
+      }
+
+      if (results.length === 0) {
+        return 'No exercises found matching the criteria.';
+      }
+
+      // Return summarized results (limit to 10 to avoid token bloat)
+      const displayResults = results.slice(0, 10);
+      const resultSummary = displayResults
+        .map(
+          (ex) =>
+            `- ${ex.name} (${ex.difficulty}, muscles: ${ex.primaryMuscles.join(', ')}, equipment: ${ex.equipmentRequired.join(', ')})`
+        )
+        .join('\n');
+
+      return `Found ${results.length} exercises${results.length > 10 ? ' (showing first 10)' : ''}:\n${resultSummary}`;
+    }
+
+    case 'get_exercise_details': {
+      const { exerciseName } = input as { exerciseName: string };
+      const lowerName = exerciseName.toLowerCase();
+
+      // Try exact match first
+      let exercise = exerciseLibrary.find(
+        (ex) => ex.name.toLowerCase() === lowerName
+      );
+
+      // Fall back to partial match
+      if (!exercise) {
+        exercise = exerciseLibrary.find((ex) =>
+          ex.name.toLowerCase().includes(lowerName)
+        );
+      }
+
+      if (!exercise) {
+        return `Exercise "${exerciseName}" not found in the user's library.`;
+      }
+
+      const details = [
+        `**${exercise.name}**`,
+        `Difficulty: ${exercise.difficulty}`,
+        `Primary muscles: ${exercise.primaryMuscles.join(', ')}`,
+        exercise.secondaryMuscles?.length
+          ? `Secondary muscles: ${exercise.secondaryMuscles.join(', ')}`
+          : null,
+        `Equipment: ${exercise.equipmentRequired.join(', ')}`,
+        '',
+        '**Instructions:**',
+        ...exercise.instructions.map((inst, i) => `${i + 1}. ${inst}`),
+        exercise.tips?.length
+          ? `\n**Tips:**\n${exercise.tips.map((tip) => `- ${tip}`).join('\n')}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      return details;
+    }
+
+    default:
+      return 'Unknown query tool';
+  }
+}
+
 function buildSystemPrompt(
   userContext: {
     goals?: string[];
@@ -415,9 +544,21 @@ You have access to workout management tools that save directly to the user's acc
 - When the user asks about exercise form or how to do an exercise, use get_exercise_details to look it up`;
 }
 
-export async function POST(request: NextRequest) {
+async function handleChatRequest(
+  request: NextRequest,
+  { userId }: { userId: string }
+) {
   try {
-    const { messages, userContext, activePlanSchedule, exerciseLibrarySummary } = await request.json();
+    const {
+      messages,
+      userContext,
+      activePlanSchedule,
+      exerciseLibrarySummary,
+      exerciseLibrary = [] // Full exercise library for query tools
+    } = await request.json();
+
+    // Log authenticated request (userId is now verified)
+    logger.log('Chat request from user:', userId);
 
     const systemPrompt = buildSystemPrompt(
       userContext,
@@ -425,6 +566,7 @@ export async function POST(request: NextRequest) {
       exerciseLibrarySummary || null
     );
 
+    const anthropic = await getAnthropicClient();
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
@@ -452,13 +594,31 @@ export async function POST(request: NextRequest) {
 
     // If tools were called but no text response, continue conversation
     if (!assistantMessage && response.stop_reason === 'tool_use') {
+      // Build tool results - execute query tools server-side, mark others as needing client execution
       const toolResultBlocks: Anthropic.ToolResultBlockParam[] = response.content
         .filter((block): block is Anthropic.ToolUseBlock => block.type === 'tool_use')
-        .map((block) => ({
-          type: 'tool_result' as const,
-          tool_use_id: block.id,
-          content: 'Saved successfully',
-        }));
+        .map((block) => {
+          // Execute query tools server-side with real results
+          if (QUERY_TOOLS.includes(block.name)) {
+            const result = executeQueryTool(
+              block.name,
+              block.input as Record<string, unknown>,
+              exerciseLibrary as ExerciseData[]
+            );
+            return {
+              type: 'tool_result' as const,
+              tool_use_id: block.id,
+              content: result,
+            };
+          }
+
+          // Write tools will be executed client-side
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: block.id,
+            content: 'Saved successfully',
+          };
+        });
 
       const continuedResponse = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
@@ -493,7 +653,7 @@ export async function POST(request: NextRequest) {
       toolActions,
     });
   } catch (error) {
-    console.error('Chat API error:', error);
+    logger.error('Chat API error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       { error: 'Failed to get response from AI', details: errorMessage },
@@ -501,3 +661,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// Export POST handler wrapped with authentication
+export const POST = withAuth(handleChatRequest);

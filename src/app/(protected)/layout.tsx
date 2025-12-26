@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import Sidebar from '@/components/layout/Sidebar';
 import MobileNav from '@/components/layout/MobileNav';
 
@@ -45,7 +46,9 @@ export default function ProtectedLayout({
 
       {/* Main Content */}
       <main className="lg:ml-64 min-h-screen pb-24 lg:pb-0">
-        {children}
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
       </main>
 
       {/* Mobile Bottom Navigation - Hidden on desktop */}
