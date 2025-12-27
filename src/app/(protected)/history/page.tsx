@@ -45,6 +45,7 @@ export default function HistoryPage() {
         getWorkouts(user.uid, 90),
         getAllPlans(user.uid),
       ]);
+
       setWorkouts(workoutsData);
       setPlans(plansData);
     } catch (error) {
@@ -65,7 +66,17 @@ export default function HistoryPage() {
   };
 
   const getWorkoutForDay = (date: Date) => {
-    return workouts.find((w) => isSameDay(new Date(w.date), date));
+    // Find all workouts for this day
+    const dayWorkouts = workouts.filter((w) => {
+      const workoutDate = w.date instanceof Date ? w.date : new Date(w.date);
+      return isSameDay(workoutDate, date);
+    });
+
+    if (dayWorkouts.length === 0) return undefined;
+
+    // Prioritize completed workouts over incomplete ones
+    const completedWorkout = dayWorkouts.find((w) => w.completed);
+    return completedWorkout || dayWorkouts[0];
   };
 
   const getScheduledWorkoutForDate = (date: Date): DaySchedule | null => {

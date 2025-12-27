@@ -19,19 +19,10 @@ import {
   VALID_UNITS,
 } from '@/types/onboarding';
 import { withAuth } from '@/lib/auth/verifyAuth';
-import { getAnthropicApiKey } from '@/lib/secrets/firestoreSecrets';
+import { getAnthropicClient, MODEL_CONFIG } from '@/lib/ai/anthropicClient';
 import { logger } from '@/lib/logger';
-
-// Lazy-initialized Anthropic client
-let anthropicClient: Anthropic | null = null;
-
-async function getAnthropicClient(): Promise<Anthropic> {
-  if (!anthropicClient) {
-    const apiKey = await getAnthropicApiKey();
-    anthropicClient = new Anthropic({ apiKey });
-  }
-  return anthropicClient;
-}
+import { onboardingChatRequestSchema, validateRequest } from '@/lib/validation/schemas';
+import { applyRateLimit, getRateLimitHeaders } from '@/lib/rateLimit';
 
 function formatCollectedData(data: OnboardingState): string {
   const fields = [];
@@ -266,17 +257,45 @@ async function handleOnboardingChat(
   request: NextRequest,
   { userId }: { userId: string }
 ) {
+  // Apply rate limiting (now async with Firestore)
+  const rateLimitResult = await applyRateLimit(userId, 'onboardingChat');
+  if (rateLimitResult) {
+    return rateLimitResult;
+  }
+
   try {
-    const { messages, collectedData, userConfirmed = false } = await request.json();
+    // Parse and validate request body
+    const rawBody = await request.json();
+    const validation = validateRequest(onboardingChatRequestSchema, rawBody);
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: 400 }
+      );
+    }
+
+    const { messages, collectedData, userConfirmed } = validation.data;
 
     logger.log('Onboarding chat request from user:', userId);
 
-    const systemPrompt = buildSystemPrompt(collectedData || {}, userConfirmed);
+    // Convert Zod's undefined to null for OnboardingState compatibility
+    const normalizedData: OnboardingState = {
+      goals: collectedData?.goals ?? null,
+      limitations: collectedData?.limitations ?? null,
+      equipment: collectedData?.equipment ?? null,
+      experienceLevel: collectedData?.experienceLevel ?? null,
+      workoutDays: collectedData?.workoutDays ?? null,
+      sessionLength: collectedData?.sessionLength ?? null,
+      units: collectedData?.units ?? null,
+    };
+
+    const systemPrompt = buildSystemPrompt(normalizedData, userConfirmed);
 
     const anthropic = await getAnthropicClient();
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+      model: MODEL_CONFIG.onboarding.model,
+      max_tokens: MODEL_CONFIG.onboarding.maxTokens,
       system: systemPrompt,
       tools,
       messages: messages.map((m: { role: string; content: string }) => ({
@@ -329,8 +348,8 @@ async function handleOnboardingChat(
         }));
 
       const continuedResponse = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
+        model: MODEL_CONFIG.onboarding.model,
+        max_tokens: MODEL_CONFIG.onboarding.maxTokens,
         system: systemPrompt,
         tools,
         messages: [
@@ -374,7 +393,15 @@ async function handleOnboardingChat(
       suggestedOptions,
     };
 
-    return NextResponse.json(result);
+    const jsonResponse = NextResponse.json(result);
+
+    // Add rate limit headers (now async with Firestore)
+    const rateLimitHeaders = await getRateLimitHeaders(userId, 'onboardingChat');
+    Object.entries(rateLimitHeaders).forEach(([key, value]) => {
+      jsonResponse.headers.set(key, value);
+    });
+
+    return jsonResponse;
   } catch (error) {
     logger.error('Onboarding chat API error:', error);
     return NextResponse.json(

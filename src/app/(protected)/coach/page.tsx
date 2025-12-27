@@ -13,18 +13,16 @@ import {
 } from '@/lib/firebase/firestore';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { usePlanManagement } from '@/hooks/usePlanManagement';
+import { useChatSession } from '@/hooks/useChatSession';
 import type { DaySchedule, PlanExercise } from '@/types/plan';
 import type { LibraryExercise, NewExercise, ExerciseFilters, MuscleGroup, EquipmentType, DifficultyLevel } from '@/types/exercise';
 import { ConfirmPauseModal } from '@/components/ui/ConfirmPauseModal';
-import { MarkdownMessage } from '@/components/chat/MarkdownMessage';
+import { ChatHistoryDrawer } from '@/components/chat/ChatHistoryDrawer';
+import { ChatInput } from '@/components/chat/ChatInput';
+import { MessageList, type Message } from '@/components/chat/MessageList';
+import { CoachHeader } from '@/components/chat/CoachHeader';
+import { CoachSidebar, MobileQuickActions } from '@/components/chat/CoachSidebar';
 import { logger } from '@/lib/logger';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  planUpdated?: boolean;
-}
 
 interface ToolAction {
   tool: string;
@@ -33,7 +31,6 @@ interface ToolAction {
 
 const QUICK_ACTIONS = [
   { label: 'Modify today\'s workout', prompt: 'I need to modify today\'s workout. What are my options?' },
-  { label: 'I\'m feeling tired', prompt: 'I\'m feeling tired today. Should I still work out or take it easy?' },
   { label: 'Show alternatives', prompt: 'Can you show me alternative exercises for my current workout?' },
   { label: 'Explain my progress', prompt: 'Can you explain my progress and how I\'m doing overall?' },
 ];
@@ -50,27 +47,45 @@ export default function CoachPage() {
     loadActivePlan,
   } = usePlanManagement({ userId: user?.uid });
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: `Hi${user?.displayName ? ` ${user.displayName.split(' ')[0]}` : ''}! I'm your AI personal trainer. I know your goals${user?.profile?.goals?.length ? ` (${user.profile.goals.join(', ')})` : ''} and any limitations you've shared. How can I help you today?`,
-    },
-  ]);
-  const [input, setInput] = useState('');
+  // Chat session hook for persistence
+  const {
+    currentSession,
+    messages: persistedMessages,
+    sessions,
+    loading: sessionLoading,
+    sessionsLoading,
+    sendMessage: persistMessages,
+    startNewChat,
+    loadSession,
+    deleteSession,
+  } = useChatSession({ userId: user?.uid });
+
+  // Welcome message for new sessions
+  const welcomeMessage: Message = useMemo(() => ({
+    id: 'welcome',
+    role: 'assistant',
+    content: `Hi${user?.displayName ? ` ${user.displayName.split(' ')[0]}` : ''}! I'm your AI personal trainer. I know your goals${user?.profile?.goals?.length ? ` (${user.profile.goals.join(', ')})` : ''} and any limitations you've shared. How can I help you today?`,
+  }), [user?.displayName, user?.profile?.goals]);
+
+  // Always prepend welcome message to display (it's not persisted)
+  const messages: Message[] = useMemo(() => {
+    const mappedMessages = persistedMessages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      planUpdated: m.planUpdated,
+    }));
+    return [welcomeMessage, ...mappedMessages];
+  }, [persistedMessages, welcomeMessage]);
+
   const [loading, setLoading] = useState(false);
   const [exerciseLibrary, setExerciseLibrary] = useState<LibraryExercise[]>([]);
+  const [exerciseLibraryHash, setExerciseLibraryHash] = useState<string | null>(null);
   const [showPauseConfirmation, setShowPauseConfirmation] = useState(false);
   const [pendingPlanData, setPendingPlanData] = useState<DaySchedule[] | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+  // Track if library was modified since last API call to force full resend
+  const libraryModifiedRef = useRef(false);
 
   // Load active plan and exercise library on mount
   useEffect(() => {
@@ -177,7 +192,7 @@ export default function CoachPage() {
             const filters = action.data as ExerciseFilters;
             const results = await searchExercises(user.uid, filters);
             // Store results for tool response (handled in API continuation)
-            console.log(`Found ${results.length} exercises matching query`);
+            logger.log(`Found ${results.length} exercises matching query`);
             break;
           }
 
@@ -200,10 +215,11 @@ export default function CoachPage() {
               ...(tips && tips.length > 0 && { tips }),
             };
             await createExercise(user.uid, newExercise);
-            // Reload exercise library
+            // Reload exercise library and mark as modified for next API call
             const updatedLibrary = await getExerciseLibrary(user.uid);
             setExerciseLibrary(updatedLibrary);
-            console.log(`Added exercise: ${exerciseData.name}`);
+            libraryModifiedRef.current = true;
+            logger.log(`Added exercise: ${exerciseData.name}`);
             break;
           }
 
@@ -211,9 +227,9 @@ export default function CoachPage() {
             const { exerciseName } = action.data as { exerciseName: string };
             const exercise = await getExerciseByName(user.uid, exerciseName);
             if (exercise) {
-              console.log(`Found exercise: ${exercise.name}`);
+              logger.log(`Found exercise: ${exercise.name}`);
             } else {
-              console.log(`Exercise not found: ${exerciseName}`);
+              logger.log(`Exercise not found: ${exerciseName}`);
             }
             break;
           }
@@ -224,33 +240,39 @@ export default function CoachPage() {
     }
 
     return planUpdated;
-  }, [user?.uid, activePlan, createNewPlan, setActivePlan, exerciseLibrary]);
+  }, [user?.uid, activePlan, createNewPlan, setActivePlan]);
 
   const sendMessage = async (content: string) => {
     if (!content.trim() || loading) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: content.trim(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
+    const userContent = content.trim();
     setLoading(true);
 
     try {
+      // Build messages array for API (include persisted messages)
+      const apiMessages = [
+        ...persistedMessages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        { role: 'user' as const, content: userContent },
+      ];
+
+      // Conditionally send exercise library:
+      // - Send full library if no hash yet, or if library was modified
+      // - Otherwise send only the hash to use server cache
+      const shouldSendFullLibrary = !exerciseLibraryHash || libraryModifiedRef.current;
+
       const response = await fetchWithAuth('/api/chat', {
         method: 'POST',
         body: JSON.stringify({
-          messages: [...messages, userMessage].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: apiMessages,
           userContext: user?.profile,
           activePlanSchedule: activePlan?.workoutSchedule || null,
           exerciseLibrarySummary,
-          exerciseLibrary: exerciseLibraryForQuery,
+          // Only send full library when needed, otherwise server uses cache
+          exerciseLibrary: shouldSendFullLibrary ? exerciseLibraryForQuery : [],
+          exerciseLibraryHash: exerciseLibraryHash || undefined,
         }),
       });
 
@@ -262,38 +284,29 @@ export default function CoachPage() {
 
       const data = await response.json();
 
+      // Store the new hash from server and clear modified flag
+      if (data.exerciseLibraryHash) {
+        setExerciseLibraryHash(data.exerciseLibraryHash);
+        libraryModifiedRef.current = false;
+      }
+
       // Handle tool actions (save to Firestore)
       const planUpdated = await handleToolActions(data.toolActions || []);
 
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.message,
-        planUpdated,
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
+      // Persist both messages to Firestore
+      await persistMessages(userContent, data.message, planUpdated);
     } catch (error) {
       logger.error('Chat error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: errorMessage.includes('authenticated')
-            ? 'Your session has expired. Please refresh the page and try again.'
-            : 'Sorry, I encountered an error. Please try again in a moment.',
-        },
-      ]);
+      const errorResponse = errorMessage.includes('authenticated')
+        ? 'Your session has expired. Please refresh the page and try again.'
+        : 'Sorry, I encountered an error. Please try again in a moment.';
+
+      // Still persist the user message and error response
+      await persistMessages(userContent, errorResponse, false);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    sendMessage(input);
   };
 
   const handleQuickAction = (prompt: string) => {
@@ -308,17 +321,12 @@ export default function CoachPage() {
       const success = await createNewPlan(pendingPlanData);
 
       if (success) {
-        // Update the last assistant message to show plan was saved
-        setMessages((prev) => {
-          const updated = [...prev];
-          if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
-            updated[updated.length - 1] = {
-              ...updated[updated.length - 1],
-              planUpdated: true,
-            };
-          }
-          return updated;
-        });
+        // Add a confirmation message that the plan was saved
+        await persistMessages(
+          'Create this plan',
+          'Your new workout plan has been saved and is now active. Your previous program has been paused.',
+          true
+        );
       }
     } catch (error) {
       logger.error('Error creating plan:', error);
@@ -329,170 +337,59 @@ export default function CoachPage() {
     }
   };
 
-  const handleCancelCreatePlan = () => {
+  const handleCancelCreatePlan = async () => {
     setShowPauseConfirmation(false);
     setPendingPlanData(null);
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content:
-          'No problem! I kept your current program active. Let me know if you change your mind or want to make modifications to your existing program instead.',
-      },
-    ]);
+    // Persist the cancel response
+    await persistMessages(
+      'Keep current program',
+      'No problem! I kept your current program active. Let me know if you change your mind or want to make modifications to your existing program instead.',
+      false
+    );
   };
 
   return (
-    <div className="h-screen flex flex-col lg:flex-row">
+    <div className="h-[calc(100vh-6rem)] lg:h-screen flex flex-col lg:flex-row">
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-gray-50">
-        {/* Header */}
-        <div className="bg-white border-b border-gray-200 p-4 lg:p-6">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
-              AI
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">Your AI Coach</h1>
-              <p className="text-green-600 text-sm">● Online — Knows your goals & history</p>
-            </div>
-          </div>
-        </div>
+      <div className="flex-1 flex flex-col min-h-0 bg-gray-50">
+        <CoachHeader
+          displayName={user?.displayName}
+          loading={loading || sessionLoading}
+          onNewChat={startNewChat}
+          onOpenHistory={() => setShowHistoryDrawer(true)}
+        />
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${
-                message.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              <div
-                className={`max-w-[85%] lg:max-w-[70%] p-4 rounded-2xl ${
-                  message.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-br-sm'
-                    : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
-                }`}
-              >
-                {message.role === 'assistant' ? (
-                  <MarkdownMessage content={message.content} />
-                ) : (
-                  <p className="text-base lg:text-lg whitespace-pre-wrap">
-                    {message.content}
-                  </p>
-                )}
-                {message.planUpdated && (
-                  <div className="mt-2 pt-2 border-t border-green-200 text-sm text-green-600 flex items-center gap-1">
-                    <span>&#10003;</span> Plan saved to your account
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+        <MessageList
+          messages={messages}
+          loading={loading}
+          sessionLoading={sessionLoading}
+        />
 
-          {loading && (
-            <div className="flex justify-start">
-              <div className="bg-white text-gray-900 p-4 rounded-2xl shadow-sm rounded-bl-sm">
-                <div className="flex items-center gap-2">
-                  <div className="spinner" />
-                  <span className="text-gray-500">Thinking...</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input Area */}
-        <div className="bg-white border-t border-gray-200 p-4 lg:p-6">
-          <form onSubmit={handleSubmit} className="flex gap-3">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Type your message here..."
-              className="flex-1 p-4 text-lg border-2 border-gray-200 rounded-xl focus:border-blue-600 focus:outline-none"
-              disabled={loading}
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="w-14 h-14 bg-blue-600 text-white rounded-xl flex items-center justify-center text-2xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ↑
-            </button>
-          </form>
-        </div>
+        <ChatInput
+          onSend={sendMessage}
+          disabled={loading}
+        />
       </div>
 
-      {/* Sidebar - Quick Actions (Desktop) */}
-      <div className="hidden lg:block w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto">
-        <div className="mb-6">
-          <h3 className="text-sm font-semibold text-gray-500 mb-4">
-            QUICK ACTIONS
-          </h3>
-          <div className="space-y-3">
-            {QUICK_ACTIONS.map((action, index) => (
-              <button
-                key={index}
-                onClick={() => handleQuickAction(action.prompt)}
-                disabled={loading}
-                className="w-full p-4 text-left bg-gray-50 hover:bg-gray-100 rounded-xl text-gray-700 font-medium transition-colors disabled:opacity-50"
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
-        </div>
+      <CoachSidebar
+        userProfile={user?.profile}
+        sessions={sessions}
+        activeSessionId={currentSession?.id || null}
+        quickActions={QUICK_ACTIONS}
+        loading={loading || sessionLoading}
+        sessionsLoading={sessionsLoading}
+        onNewChat={startNewChat}
+        onQuickAction={handleQuickAction}
+        onSelectSession={loadSession}
+        onDeleteSession={deleteSession}
+      />
 
-        <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
-          <h3 className="text-sm font-semibold text-blue-800 mb-3">
-            AI KNOWS ABOUT YOU
-          </h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Goals</span>
-              <span className="font-medium text-gray-900">
-                {user?.profile?.goals?.slice(0, 2).join(', ') || 'Not set'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Limitations</span>
-              <span className="font-medium text-gray-900">
-                {user?.profile?.limitations?.length
-                  ? user.profile.limitations.slice(0, 2).join(', ')
-                  : 'None'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Equipment</span>
-              <span className="font-medium text-gray-900">
-                {user?.profile?.equipment?.replace('_', ' ') || 'Not set'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile Quick Actions */}
-      <div className="lg:hidden bg-white border-t border-gray-200 p-4">
-        <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
-          {QUICK_ACTIONS.map((action, index) => (
-            <button
-              key={index}
-              onClick={() => handleQuickAction(action.prompt)}
-              disabled={loading}
-              className="flex-shrink-0 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-full text-sm font-medium text-gray-700 transition-colors disabled:opacity-50"
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <MobileQuickActions
+        quickActions={QUICK_ACTIONS}
+        loading={loading}
+        onQuickAction={handleQuickAction}
+      />
 
       <ConfirmPauseModal
         isOpen={showPauseConfirmation}
@@ -500,6 +397,17 @@ export default function CoachPage() {
         onCancel={handleCancelCreatePlan}
         currentProgramName={activePlan?.name || 'current program'}
         loading={loading || isCreatingPlan}
+      />
+
+      <ChatHistoryDrawer
+        isOpen={showHistoryDrawer}
+        onClose={() => setShowHistoryDrawer(false)}
+        sessions={sessions}
+        activeSessionId={currentSession?.id || null}
+        onSelectSession={loadSession}
+        onDeleteSession={deleteSession}
+        onNewChat={startNewChat}
+        loading={sessionsLoading}
       />
     </div>
   );

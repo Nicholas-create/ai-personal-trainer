@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   EditableChipField,
   EditableSelectField,
@@ -18,6 +19,21 @@ import {
   SESSION_LENGTH_OPTIONS,
   UNIT_OPTIONS,
 } from '@/types/onboarding';
+
+import type { SubscriptionTier, SubscriptionInterval } from '@/types/subscription';
+
+// Wireframe: Mock subscription state (will be replaced with real data)
+const MOCK_SUBSCRIPTION: {
+  tier: SubscriptionTier;
+  status: 'active' | 'canceled';
+  interval: SubscriptionInterval;
+  currentPeriodEnd: Date;
+} = {
+  tier: 'pro', // Changed to 'pro' - change back to 'free' to see Free state
+  status: 'active',
+  interval: 'monthly',
+  currentPeriodEnd: new Date('2025-02-01'),
+};
 
 export default function ProfilePage() {
   const { user, signOut, refreshUser } = useAuth();
@@ -56,6 +72,58 @@ export default function ProfilePage() {
             >
               Log Out
             </button>
+          </div>
+
+          {/* Subscription Section */}
+          <div className="bg-white rounded-2xl p-5 lg:p-4 shadow-sm mt-4">
+            <h3 className="text-xs font-semibold text-gray-500 mb-3">
+              SUBSCRIPTION
+            </h3>
+
+            {MOCK_SUBSCRIPTION.tier === 'free' ? (
+              // Free tier state
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                    Free Plan
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mb-4">
+                  Upgrade to Pro for AI coaching and personalized workout plans.
+                </p>
+                <Link
+                  href="/pricing"
+                  className="block w-full py-2.5 px-5 bg-blue-600 text-white text-center rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+                >
+                  Upgrade to Pro
+                </Link>
+              </div>
+            ) : (
+              // Pro tier state
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+                    Pro {MOCK_SUBSCRIPTION.interval === 'yearly' ? 'Yearly' : 'Monthly'}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mb-1">
+                  Next billing date
+                </p>
+                <p className="text-sm font-medium text-gray-900 mb-4">
+                  {MOCK_SUBSCRIPTION.currentPeriodEnd.toLocaleDateString('en-GB', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+                </p>
+                <Link
+                  href="/subscription/manage"
+                  className="block w-full py-2.5 px-5 bg-gray-100 text-gray-700 text-center rounded-xl font-medium hover:bg-gray-200 transition-colors"
+                >
+                  Manage Subscription
+                </Link>
+              </div>
+            )}
           </div>
         </div>
 

@@ -7,7 +7,11 @@ const secretsCache: Map<string, { value: string; expiresAt: number }> = new Map(
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Known secret keys
-export type SecretKey = 'ANTHROPIC_API_KEY' | 'FIREBASE_SERVICE_ACCOUNT_KEY';
+export type SecretKey =
+  | 'ANTHROPIC_API_KEY'
+  | 'FIREBASE_SERVICE_ACCOUNT_KEY'
+  | 'STRIPE_SECRET_KEY'
+  | 'STRIPE_WEBHOOK_SECRET';
 
 /**
  * Get a secret from Firestore (with caching)

@@ -15,7 +15,16 @@ import {
   writeBatch,
   limit as firestoreLimit,
   runTransaction,
+  startAfter,
+  getCountFromServer,
 } from 'firebase/firestore';
+import {
+  PaginationOptions,
+  PaginatedResult,
+  normalizePaginationOptions,
+  createPaginatedResult,
+  DEFAULT_PAGE_SIZE,
+} from '@/lib/pagination';
 import { format } from 'date-fns';
 import { db } from './config';
 import { logger } from '@/lib/logger';
@@ -31,6 +40,7 @@ import type {
   EquipmentType,
   DifficultyLevel,
 } from '@/types/exercise';
+import type { ChatSession, ChatMessage, NewChatMessage } from '@/types/chat';
 
 // User operations
 export async function getUser(userId: string): Promise<User | null> {
@@ -91,13 +101,94 @@ export async function getWorkouts(
 
   return querySnapshot.docs.map((docSnap) => {
     const data = docSnap.data();
+    // Defensive date conversion - handle Timestamp, Date, or string
+    let workoutDate: Date;
+    if (data.date?.toDate) {
+      workoutDate = data.date.toDate();
+    } else if (data.date instanceof Date) {
+      workoutDate = data.date;
+    } else if (data.date) {
+      workoutDate = new Date(data.date);
+    } else {
+      workoutDate = new Date();
+    }
+
     return {
       id: docSnap.id,
       userId,
       ...data,
-      date: data.date?.toDate() || new Date(),
+      date: workoutDate,
     } as Workout;
   });
+}
+
+// Helper to convert doc to Workout with defensive date handling
+function docToWorkout(
+  docSnap: { id: string; data: () => Record<string, unknown> },
+  userId: string
+): Workout {
+  const data = docSnap.data();
+  // Defensive date conversion - handle Timestamp, Date, or string
+  let workoutDate: Date;
+  const dateValue = data.date as Timestamp | Date | string | undefined;
+  if ((dateValue as Timestamp)?.toDate) {
+    workoutDate = (dateValue as Timestamp).toDate();
+  } else if (dateValue instanceof Date) {
+    workoutDate = dateValue;
+  } else if (dateValue) {
+    workoutDate = new Date(dateValue as string);
+  } else {
+    workoutDate = new Date();
+  }
+
+  return {
+    id: docSnap.id,
+    userId,
+    ...data,
+    date: workoutDate,
+  } as Workout;
+}
+
+// Get workouts with pagination
+export async function getWorkoutsPagedAsync(
+  userId: string,
+  options?: Partial<PaginationOptions>,
+  includeCount = false
+): Promise<PaginatedResult<Workout>> {
+  const { pageSize, cursor } = normalizePaginationOptions(options);
+  const workoutsRef = collection(db, 'users', userId, 'workouts');
+
+  // Build base query
+  let q = query(
+    workoutsRef,
+    orderBy('date', 'desc'),
+    firestoreLimit(pageSize + 1)
+  );
+
+  // If cursor provided, start after that document
+  if (cursor) {
+    const cursorDoc = await getDoc(doc(workoutsRef, cursor));
+    if (cursorDoc.exists()) {
+      q = query(
+        workoutsRef,
+        orderBy('date', 'desc'),
+        startAfter(cursorDoc),
+        firestoreLimit(pageSize + 1)
+      );
+    }
+  }
+
+  const querySnapshot = await getDocs(q);
+  const workouts = querySnapshot.docs.map((docSnap) => docToWorkout(docSnap, userId));
+
+  // Get total count if requested
+  let totalCount: number | undefined;
+  if (includeCount) {
+    const countSnapshot = await getCountFromServer(query(workoutsRef));
+    totalCount = countSnapshot.data().count;
+  }
+
+  return createPaginatedResult(workouts, pageSize, (workout) => workout.id, totalCount);
 }
 
 export async function createWorkout(
@@ -110,6 +201,35 @@ export async function createWorkout(
     date: Timestamp.fromDate(workout.date),
   });
   return docRef.id;
+}
+
+// Get existing workout for today (if any) to prevent duplicate creation
+export async function getTodayWorkout(
+  userId: string,
+  planId: string
+): Promise<Workout | null> {
+  const workoutsRef = collection(db, 'users', userId, 'workouts');
+
+  // Get today's date range (start and end of day)
+  const today = new Date();
+  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+  const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+
+  const q = query(
+    workoutsRef,
+    where('planId', '==', planId),
+    where('date', '>=', Timestamp.fromDate(startOfDay)),
+    where('date', '<=', Timestamp.fromDate(endOfDay)),
+    orderBy('date', 'desc'),
+    firestoreLimit(1)
+  );
+
+  const querySnapshot = await getDocs(q);
+
+  if (querySnapshot.empty) return null;
+
+  const docSnap = querySnapshot.docs[0];
+  return docToWorkout(docSnap, userId);
 }
 
 export async function updateWorkout(
@@ -272,13 +392,55 @@ export async function updateExerciseInPlan(
 
 // Program management operations
 
-// Get ALL plans for a user (for program history)
+// Get ALL plans for a user (for program history) - legacy non-paginated version
 export async function getAllPlans(userId: string): Promise<WorkoutPlan[]> {
   const plansRef = collection(db, 'users', userId, 'plans');
   const q = query(plansRef, orderBy('generatedAt', 'desc'));
   const querySnapshot = await getDocs(q);
 
   return querySnapshot.docs.map((docSnap) => docToWorkoutPlan(docSnap, userId));
+}
+
+// Get plans with pagination
+export async function getPlansPagedAsync(
+  userId: string,
+  options?: Partial<PaginationOptions>,
+  includeCount = false
+): Promise<PaginatedResult<WorkoutPlan>> {
+  const { pageSize, cursor } = normalizePaginationOptions(options);
+  const plansRef = collection(db, 'users', userId, 'plans');
+
+  // Build base query
+  let q = query(
+    plansRef,
+    orderBy('generatedAt', 'desc'),
+    firestoreLimit(pageSize + 1) // Fetch one extra to detect hasMore
+  );
+
+  // If cursor provided, start after that document
+  if (cursor) {
+    const cursorDoc = await getDoc(doc(plansRef, cursor));
+    if (cursorDoc.exists()) {
+      q = query(
+        plansRef,
+        orderBy('generatedAt', 'desc'),
+        startAfter(cursorDoc),
+        firestoreLimit(pageSize + 1)
+      );
+    }
+  }
+
+  const querySnapshot = await getDocs(q);
+  const plans = querySnapshot.docs.map((docSnap) => docToWorkoutPlan(docSnap, userId));
+
+  // Get total count if requested
+  let totalCount: number | undefined;
+  if (includeCount) {
+    const countSnapshot = await getCountFromServer(query(plansRef));
+    totalCount = countSnapshot.data().count;
+  }
+
+  return createPaginatedResult(plans, pageSize, (plan) => plan.id, totalCount);
 }
 
 // Rename a plan
@@ -306,7 +468,15 @@ export async function resumePlan(userId: string, planId: string): Promise<void> 
   const plansRef = collection(db, 'users', userId, 'plans');
   const planRef = doc(db, 'users', userId, 'plans', planId);
 
-  // Use transaction to ensure atomicity - prevents race conditions
+  // Query for potentially active plans BEFORE the transaction
+  // We'll verify their state inside the transaction
+  const activeQuery = query(plansRef, where('active', '==', true));
+  const potentiallyActivePlans = await getDocs(activeQuery);
+  const activePlanRefs = potentiallyActivePlans.docs
+    .filter((docSnap) => docSnap.id !== planId)
+    .map((docSnap) => docSnap.ref);
+
+  // Use transaction to ensure atomicity
   await runTransaction(db, async (transaction) => {
     // Get the target plan first
     const planSnap = await transaction.get(planRef);
@@ -315,14 +485,12 @@ export async function resumePlan(userId: string, planId: string): Promise<void> 
       throw new Error('Plan not found');
     }
 
-    // Query for active plans
-    const activeQuery = query(plansRef, where('active', '==', true));
-    const activePlans = await getDocs(activeQuery);
-
-    // Deactivate all other active plans in the transaction
-    for (const docSnap of activePlans.docs) {
-      if (docSnap.id !== planId) {
-        transaction.update(docSnap.ref, {
+    // Re-read each potentially active plan inside the transaction to verify state
+    // This ensures we only deactivate plans that are still active
+    for (const ref of activePlanRefs) {
+      const activeSnap = await transaction.get(ref);
+      if (activeSnap.exists() && activeSnap.data().active === true) {
+        transaction.update(ref, {
           status: 'paused',
           active: false,
           pausedAt: serverTimestamp(),
@@ -436,6 +604,57 @@ export async function getExerciseLibrary(userId: string): Promise<LibraryExercis
   } catch (error) {
     logger.error('Error fetching exercise library:', error);
     return [];
+  }
+}
+
+// Get exercises with pagination
+export async function getExercisesPagedAsync(
+  userId: string,
+  options?: Partial<PaginationOptions>,
+  includeCount = false
+): Promise<PaginatedResult<LibraryExercise>> {
+  const { pageSize, cursor } = normalizePaginationOptions(options);
+  const exercisesRef = collection(db, 'users', userId, 'exercises');
+
+  try {
+    // Build base query - order by name for consistent pagination
+    let q = query(
+      exercisesRef,
+      orderBy('name'),
+      firestoreLimit(pageSize + 1)
+    );
+
+    // If cursor provided, start after that document
+    if (cursor) {
+      const cursorDoc = await getDoc(doc(exercisesRef, cursor));
+      if (cursorDoc.exists()) {
+        q = query(
+          exercisesRef,
+          orderBy('name'),
+          startAfter(cursorDoc),
+          firestoreLimit(pageSize + 1)
+        );
+      }
+    }
+
+    const querySnapshot = await getDocs(q);
+    const exercises = querySnapshot.docs.map((docSnap) => docToLibraryExercise(docSnap));
+
+    // Get total count if requested
+    let totalCount: number | undefined;
+    if (includeCount) {
+      const countSnapshot = await getCountFromServer(query(exercisesRef));
+      totalCount = countSnapshot.data().count;
+    }
+
+    return createPaginatedResult(exercises, pageSize, (ex) => ex.id, totalCount);
+  } catch (error) {
+    logger.error('Error fetching paginated exercise library:', error);
+    return {
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    };
   }
 }
 
@@ -592,6 +811,315 @@ export async function getExerciseByName(
   }
 
   return match || null;
+}
+
+// ============================================
+// Chat Session Operations
+// ============================================
+
+// Helper to convert Firestore doc to ChatSession
+function docToChatSession(
+  docSnap: { id: string; data: () => Record<string, unknown> },
+  userId: string
+): ChatSession {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    userId,
+    title: data.title as string,
+    createdAt: (data.createdAt as Timestamp)?.toDate?.() || new Date(),
+    updatedAt: (data.updatedAt as Timestamp)?.toDate?.() || new Date(),
+    messageCount: (data.messageCount as number) || 0,
+    lastMessage: (data.lastMessage as string) || '',
+    isActive: (data.isActive as boolean) || false,
+  };
+}
+
+// Helper to convert Firestore doc to ChatMessage
+function docToChatMessage(
+  docSnap: { id: string; data: () => Record<string, unknown> }
+): ChatMessage {
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    role: data.role as 'user' | 'assistant',
+    content: data.content as string,
+    createdAt: (data.createdAt as Timestamp)?.toDate?.() || new Date(),
+    planUpdated: data.planUpdated as boolean | undefined,
+  };
+}
+
+// Get the currently active chat session
+export async function getActiveChatSession(userId: string): Promise<ChatSession | null> {
+  const sessionsRef = collection(db, 'users', userId, 'chatSessions');
+  const q = query(sessionsRef, where('isActive', '==', true), firestoreLimit(1));
+  const querySnapshot = await getDocs(q);
+
+  if (querySnapshot.empty) return null;
+
+  return docToChatSession(querySnapshot.docs[0], userId);
+}
+
+// Get all chat sessions for a user, ordered by most recent
+export async function getChatSessions(
+  userId: string,
+  limitCount: number = 20
+): Promise<ChatSession[]> {
+  const sessionsRef = collection(db, 'users', userId, 'chatSessions');
+  const q = query(
+    sessionsRef,
+    orderBy('updatedAt', 'desc'),
+    firestoreLimit(limitCount)
+  );
+  const querySnapshot = await getDocs(q);
+
+  return querySnapshot.docs.map((docSnap) => docToChatSession(docSnap, userId));
+}
+
+// Create a new chat session
+export async function createChatSession(
+  userId: string,
+  title: string
+): Promise<string> {
+  const sessionsRef = collection(db, 'users', userId, 'chatSessions');
+
+  // Use transaction to ensure only one active session
+  return await runTransaction(db, async (transaction) => {
+    // Deactivate any existing active sessions
+    const activeQuery = query(sessionsRef, where('isActive', '==', true));
+    const activeSessions = await getDocs(activeQuery);
+
+    for (const docSnap of activeSessions.docs) {
+      transaction.update(docSnap.ref, { isActive: false });
+    }
+
+    // Create new session
+    const newSessionRef = doc(sessionsRef);
+    transaction.set(newSessionRef, {
+      title,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      messageCount: 0,
+      lastMessage: '',
+      isActive: true,
+    });
+
+    return newSessionRef.id;
+  });
+}
+
+// Update chat session metadata
+export async function updateChatSession(
+  userId: string,
+  sessionId: string,
+  updates: Partial<Pick<ChatSession, 'title' | 'lastMessage' | 'messageCount'>>
+): Promise<void> {
+  const sessionRef = doc(db, 'users', userId, 'chatSessions', sessionId);
+  await updateDoc(sessionRef, {
+    ...updates,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// Set a session as active (deactivates others)
+export async function setActiveChatSession(
+  userId: string,
+  sessionId: string
+): Promise<void> {
+  const sessionsRef = collection(db, 'users', userId, 'chatSessions');
+  const sessionRef = doc(db, 'users', userId, 'chatSessions', sessionId);
+
+  await runTransaction(db, async (transaction) => {
+    // Deactivate all active sessions
+    const activeQuery = query(sessionsRef, where('isActive', '==', true));
+    const activeSessions = await getDocs(activeQuery);
+
+    for (const docSnap of activeSessions.docs) {
+      transaction.update(docSnap.ref, { isActive: false });
+    }
+
+    // Activate the target session
+    transaction.update(sessionRef, { isActive: true });
+  });
+}
+
+// Deactivate a session (used when starting new chat)
+export async function deactivateChatSession(
+  userId: string,
+  sessionId: string
+): Promise<void> {
+  const sessionRef = doc(db, 'users', userId, 'chatSessions', sessionId);
+  await updateDoc(sessionRef, { isActive: false });
+}
+
+// Delete a chat session and all its messages
+export async function deleteChatSession(
+  userId: string,
+  sessionId: string
+): Promise<void> {
+  const sessionRef = doc(db, 'users', userId, 'chatSessions', sessionId);
+  const messagesRef = collection(db, 'users', userId, 'chatSessions', sessionId, 'messages');
+
+  // Delete all messages first (Firestore doesn't cascade deletes)
+  const messagesSnapshot = await getDocs(messagesRef);
+  const batch = writeBatch(db);
+
+  for (const msgDoc of messagesSnapshot.docs) {
+    batch.delete(msgDoc.ref);
+  }
+
+  // Delete the session document
+  batch.delete(sessionRef);
+
+  await batch.commit();
+}
+
+// Get all messages for a chat session (legacy - use paginated version for large histories)
+export async function getChatMessages(
+  userId: string,
+  sessionId: string
+): Promise<ChatMessage[]> {
+  const messagesRef = collection(
+    db,
+    'users',
+    userId,
+    'chatSessions',
+    sessionId,
+    'messages'
+  );
+  const q = query(messagesRef, orderBy('createdAt', 'asc'));
+  const querySnapshot = await getDocs(q);
+
+  return querySnapshot.docs.map((docSnap) => docToChatMessage(docSnap));
+}
+
+// Get messages with pagination - for long chat histories
+export async function getChatMessagesPagedAsync(
+  userId: string,
+  sessionId: string,
+  options?: Partial<PaginationOptions>,
+  includeCount = false
+): Promise<PaginatedResult<ChatMessage>> {
+  const { pageSize, cursor } = normalizePaginationOptions(options);
+  const messagesRef = collection(
+    db,
+    'users',
+    userId,
+    'chatSessions',
+    sessionId,
+    'messages'
+  );
+
+  // Build base query - order by createdAt ascending for chronological order
+  let q = query(
+    messagesRef,
+    orderBy('createdAt', 'asc'),
+    firestoreLimit(pageSize + 1)
+  );
+
+  // If cursor provided, start after that document
+  if (cursor) {
+    const cursorDoc = await getDoc(doc(messagesRef, cursor));
+    if (cursorDoc.exists()) {
+      q = query(
+        messagesRef,
+        orderBy('createdAt', 'asc'),
+        startAfter(cursorDoc),
+        firestoreLimit(pageSize + 1)
+      );
+    }
+  }
+
+  const querySnapshot = await getDocs(q);
+  const messages = querySnapshot.docs.map((docSnap) => docToChatMessage(docSnap));
+
+  // Get total count if requested
+  let totalCount: number | undefined;
+  if (includeCount) {
+    const countSnapshot = await getCountFromServer(query(messagesRef));
+    totalCount = countSnapshot.data().count;
+  }
+
+  return createPaginatedResult(messages, pageSize, (msg) => msg.id, totalCount);
+}
+
+// Get the most recent N messages for a chat session (for initial load)
+export async function getRecentChatMessages(
+  userId: string,
+  sessionId: string,
+  limit: number = 50
+): Promise<ChatMessage[]> {
+  const messagesRef = collection(
+    db,
+    'users',
+    userId,
+    'chatSessions',
+    sessionId,
+    'messages'
+  );
+
+  // Get the most recent messages in descending order
+  const q = query(
+    messagesRef,
+    orderBy('createdAt', 'desc'),
+    firestoreLimit(limit)
+  );
+  const querySnapshot = await getDocs(q);
+
+  // Reverse to get chronological order
+  return querySnapshot.docs
+    .map((docSnap) => docToChatMessage(docSnap))
+    .reverse();
+}
+
+// Add a message to a chat session and update session metadata
+// Uses transaction to prevent race condition on message count
+export async function addChatMessage(
+  userId: string,
+  sessionId: string,
+  message: NewChatMessage
+): Promise<string> {
+  const sessionRef = doc(db, 'users', userId, 'chatSessions', sessionId);
+  const messagesRef = collection(
+    db,
+    'users',
+    userId,
+    'chatSessions',
+    sessionId,
+    'messages'
+  );
+
+  // Generate message document reference before transaction
+  const messageRef = doc(messagesRef);
+
+  // Calculate last message preview
+  const lastMessagePreview =
+    message.content.length > 100
+      ? message.content.substring(0, 100) + '...'
+      : message.content;
+
+  // Use transaction to atomically add message and update count
+  await runTransaction(db, async (transaction) => {
+    const sessionSnap = await transaction.get(sessionRef);
+    const currentCount = sessionSnap.exists()
+      ? ((sessionSnap.data().messageCount as number) || 0)
+      : 0;
+
+    // Add the message
+    transaction.set(messageRef, {
+      ...message,
+      createdAt: serverTimestamp(),
+    });
+
+    // Update session metadata atomically
+    transaction.update(sessionRef, {
+      messageCount: currentCount + 1,
+      lastMessage: lastMessagePreview,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  return messageRef.id;
 }
 
 export { db };

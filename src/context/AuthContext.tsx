@@ -16,19 +16,37 @@ import type { User } from '@/types/user';
 // Cookie helpers for middleware auth detection
 // Uses server-side API route to set HttpOnly cookies for security
 // This prevents XSS attacks from accessing the auth cookie
-async function setAuthCookie(): Promise<void> {
+async function setAuthCookie(idToken: string): Promise<boolean> {
   try {
-    await fetch('/api/auth/session', { method: 'POST' });
-  } catch {
-    // Silently fail - auth will still work client-side via Firebase
+    const response = await fetch('/api/auth/session', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+      },
+    });
+    if (!response.ok) {
+      logger.error('Failed to set auth cookie:', response.status, await response.text().catch(() => 'unknown error'));
+      return false;
+    }
+    return true;
+  } catch (error) {
+    // Log but don't block auth - client-side auth still works via Firebase
+    logger.error('Error setting auth cookie:', error);
+    return false;
   }
 }
 
-async function clearAuthCookie(): Promise<void> {
+async function clearAuthCookie(): Promise<boolean> {
   try {
-    await fetch('/api/auth/session', { method: 'DELETE' });
-  } catch {
-    // Silently fail
+    const response = await fetch('/api/auth/session', { method: 'DELETE' });
+    if (!response.ok) {
+      logger.error('Failed to clear auth cookie:', response.status);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    logger.error('Error clearing auth cookie:', error);
+    return false;
   }
 }
 
@@ -69,8 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFirebaseUser(fbUser);
 
       if (fbUser) {
-        // Set auth cookie for middleware detection (HttpOnly via server)
-        await setAuthCookie();
+        // Get fresh ID token and set auth cookie for middleware detection
+        const idToken = await fbUser.getIdToken();
+        await setAuthCookie(idToken);
         await loadUser(fbUser);
       } else {
         await clearAuthCookie();
@@ -87,6 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true);
       const fbUser = await signInWithGoogle();
+      // Set auth cookie with token binding
+      const idToken = await fbUser.getIdToken();
+      await setAuthCookie(idToken);
       await loadUser(fbUser);
     } catch (error) {
       logger.error('Sign in error:', error);

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { getActivePlan, createWorkout, updateWorkout } from '@/lib/firebase/firestore';
+import { getActivePlan, createWorkout, updateWorkout, getTodayWorkout } from '@/lib/firebase/firestore';
 import { withRetry } from '@/lib/firebase/firestoreRetry';
 import type { WorkoutPlan, PlanExercise } from '@/types/plan';
 import type { Exercise, CompletedSet } from '@/types/workout';
@@ -45,36 +45,45 @@ export default function WorkoutPage() {
             setTodayExercises(todaySchedule.exercises);
             setWorkoutName(todaySchedule.workoutName);
 
-            // Initialize exercise tracking
-            const initialExercises: Exercise[] = todaySchedule.exercises.map(
-              (e) => ({
-                id: e.id,
-                name: e.name,
-                targetSets: e.sets,
-                targetReps: e.reps,
-                completedSets: Array(e.sets)
-                  .fill(null)
-                  .map(() => ({
-                    reps: e.reps,
-                    weight: 0,
-                    completed: false,
-                  })),
-                skipped: false,
-                notes: e.notes,
-              })
-            );
-            setExercises(initialExercises);
+            // Check if a workout for today already exists
+            const existingWorkout = await getTodayWorkout(user.uid, activePlan.id);
 
-            // Create workout record
-            const id = await createWorkout(user.uid, {
-              date: new Date(),
-              planId: activePlan.id,
-              name: todaySchedule.workoutName,
-              exercises: initialExercises,
-              completed: false,
-              duration: 0,
-            });
-            setWorkoutId(id);
+            if (existingWorkout) {
+              // Resume existing workout
+              setExercises(existingWorkout.exercises);
+              setWorkoutId(existingWorkout.id);
+            } else {
+              // Initialize exercise tracking for new workout
+              const initialExercises: Exercise[] = todaySchedule.exercises.map(
+                (e) => ({
+                  id: e.id,
+                  name: e.name,
+                  targetSets: e.sets,
+                  targetReps: e.reps,
+                  completedSets: Array(e.sets)
+                    .fill(null)
+                    .map(() => ({
+                      reps: e.reps,
+                      weight: 0,
+                      completed: false,
+                    })),
+                  skipped: false,
+                  notes: e.notes,
+                })
+              );
+              setExercises(initialExercises);
+
+              // Create new workout record
+              const id = await createWorkout(user.uid, {
+                date: new Date(),
+                planId: activePlan.id,
+                name: todaySchedule.workoutName,
+                exercises: initialExercises,
+                completed: false,
+                duration: 0,
+              });
+              setWorkoutId(id);
+            }
           }
         }
       } catch (err) {
@@ -161,6 +170,7 @@ export default function WorkoutPage() {
     try {
       setSaving(true);
       setSaveError(null);
+
       await withRetry(() =>
         updateWorkout(user.uid, workoutId, {
           completed: true,
@@ -168,6 +178,7 @@ export default function WorkoutPage() {
           exercises,
         })
       );
+
       router.push('/dashboard');
     } catch (error) {
       logger.error('Error finishing workout:', error);

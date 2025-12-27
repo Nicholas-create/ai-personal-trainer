@@ -1,8 +1,11 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
-  // Output configuration for Firebase Hosting
-  // Firebase's web frameworks integration handles this automatically
+  // Set the turbopack root to prevent workspace detection issues
+  turbopack: {
+    root: process.cwd(),
+  },
 
   // Image optimization
   images: {
@@ -20,4 +23,41 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry configuration options
+const sentryWebpackPluginOptions = {
+  // Organization and project in Sentry
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+
+  // Auth token for uploading source maps
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Only upload source maps in production
+  silent: process.env.NODE_ENV !== 'production',
+
+  // Hide source maps from the client
+  hideSourceMaps: true,
+
+  // Disable source map generation in development
+  disableServerWebpackPlugin: process.env.NODE_ENV !== 'production',
+  disableClientWebpackPlugin: process.env.NODE_ENV !== 'production',
+
+  // Automatically instrument API routes
+  autoInstrumentServerFunctions: true,
+
+  // Tunnel Sentry events through the app to avoid ad blockers
+  tunnelRoute: '/monitoring-tunnel',
+
+  // Widens the scope of the SDK to include more files
+  widenClientFileUpload: true,
+
+  // Automatically annotate React components
+  reactComponentAnnotation: {
+    enabled: true,
+  },
+};
+
+// Export with Sentry wrapper (only if DSN is configured)
+export default process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? withSentryConfig(nextConfig, sentryWebpackPluginOptions)
+  : nextConfig;

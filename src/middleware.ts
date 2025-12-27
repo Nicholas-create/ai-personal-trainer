@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+// Session cookie name - must match the one used in /api/auth/session
+// Using __session as it's the standard Firebase Hosting cookie name
+const SESSION_COOKIE_NAME = '__session';
+
 // Routes that require authentication
 const protectedRoutes = [
   '/dashboard',
@@ -10,6 +14,9 @@ const protectedRoutes = [
   '/profile',
   '/history',
   '/onboarding',
+  '/pricing',
+  '/checkout',
+  '/subscription',
 ];
 
 // Routes that should redirect to dashboard if already authenticated
@@ -18,12 +25,11 @@ const authRoutes = ['/login'];
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Check for Firebase auth session cookie
-  // Note: This provides server-side protection. The actual token verification
-  // happens client-side with Firebase Auth, but this prevents direct URL access
+  // Check for auth session cookie
+  // This provides server-side protection. The actual token verification
+  // happens on API routes, but this prevents direct URL access
   // to protected routes without any auth state.
-  const authCookie = request.cookies.get('__session') ||
-                     request.cookies.get('firebase-auth-token');
+  const authCookie = request.cookies.get(SESSION_COOKIE_NAME);
 
   const isProtectedRoute = protectedRoutes.some(route =>
     pathname.startsWith(route)

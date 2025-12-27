@@ -2,19 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import type { DaySchedule } from '@/types/plan';
 import { withAuth } from '@/lib/auth/verifyAuth';
-import { getAnthropicApiKey } from '@/lib/secrets/firestoreSecrets';
+import { getAnthropicClient, MODEL_CONFIG } from '@/lib/ai/anthropicClient';
 import { logger } from '@/lib/logger';
-
-// Lazy-initialized Anthropic client (fetches API key from Firestore on first use)
-let anthropicClient: Anthropic | null = null;
-
-async function getAnthropicClient(): Promise<Anthropic> {
-  if (!anthropicClient) {
-    const apiKey = await getAnthropicApiKey();
-    anthropicClient = new Anthropic({ apiKey });
-  }
-  return anthropicClient;
-}
+import { chatRequestSchema, validateRequest } from '@/lib/validation/schemas';
+import { applyRateLimit, getRateLimitHeaders } from '@/lib/rateLimit';
+import { getOrCacheExerciseLibrary } from '@/lib/cache/exerciseLibraryCache';
 
 const tools: Anthropic.Tool[] = [
   {
@@ -548,28 +540,57 @@ async function handleChatRequest(
   request: NextRequest,
   { userId }: { userId: string }
 ) {
+  // Apply rate limiting (now async with Firestore)
+  const rateLimitResult = await applyRateLimit(userId, 'chat');
+  if (rateLimitResult) {
+    return rateLimitResult;
+  }
+
   try {
+    // Parse and validate request body
+    const rawBody = await request.json();
+    const validation = validateRequest(chatRequestSchema, rawBody);
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: 400 }
+      );
+    }
+
     const {
       messages,
       userContext,
       activePlanSchedule,
       exerciseLibrarySummary,
-      exerciseLibrary = [] // Full exercise library for query tools
-    } = await request.json();
+      exerciseLibrary: clientExerciseLibrary,
+      exerciseLibraryHash,
+    } = validation.data;
 
     // Log authenticated request (userId is now verified)
     logger.log('Chat request from user:', userId);
 
+    // Use cached exercise library if available and hash matches
+    const { exercises: exerciseLibrary, hash: newHash, fromCache } = getOrCacheExerciseLibrary(
+      userId,
+      clientExerciseLibrary,
+      exerciseLibraryHash
+    );
+
+    if (fromCache) {
+      logger.log('Using cached exercise library for user:', userId);
+    }
+
     const systemPrompt = buildSystemPrompt(
-      userContext,
+      userContext || null,
       activePlanSchedule || null,
       exerciseLibrarySummary || null
     );
 
     const anthropic = await getAnthropicClient();
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
+      model: MODEL_CONFIG.chat.model,
+      max_tokens: MODEL_CONFIG.chat.maxTokens,
       system: systemPrompt,
       tools,
       messages: messages.map((m: { role: string; content: string }) => ({
@@ -621,8 +642,8 @@ async function handleChatRequest(
         });
 
       const continuedResponse = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
+        model: MODEL_CONFIG.chatContinuation.model,
+        max_tokens: MODEL_CONFIG.chatContinuation.maxTokens,
         system: systemPrompt,
         tools,
         messages: [
@@ -648,10 +669,20 @@ async function handleChatRequest(
       }
     }
 
-    return NextResponse.json({
+    const jsonResponse = NextResponse.json({
       message: assistantMessage || "I've updated your workout plan!",
       toolActions,
+      // Return cache hash for client to use on subsequent requests
+      exerciseLibraryHash: newHash,
     });
+
+    // Add rate limit headers (now async with Firestore)
+    const rateLimitHeaders = await getRateLimitHeaders(userId, 'chat');
+    Object.entries(rateLimitHeaders).forEach(([key, value]) => {
+      jsonResponse.headers.set(key, value);
+    });
+
+    return jsonResponse;
   } catch (error) {
     logger.error('Chat API error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
