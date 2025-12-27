@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-
-// Session cookie name - must match the one used in /api/auth/session
-// Using __session as it's the standard Firebase Hosting cookie name
-const SESSION_COOKIE_NAME = '__session';
+import { SESSION_COOKIE_NAME } from '@/lib/session/constants';
 
 // Routes that require authentication
 const protectedRoutes = [

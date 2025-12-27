@@ -2,10 +2,14 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
-  // Set the turbopack root to prevent workspace detection issues
-  turbopack: {
-    root: process.cwd(),
-  },
+  // Externalize packages that shouldn't be bundled (required for Firebase deployment)
+  // firebase-admin and related packages must run as external modules in Cloud Functions
+  serverExternalPackages: [
+    'firebase-admin',
+    '@google-cloud/firestore',
+    '@google-cloud/storage',
+    'google-auth-library',
+  ],
 
   // Image optimization
   images: {

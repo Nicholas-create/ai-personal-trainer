@@ -9,9 +9,7 @@ import {
   deleteSession,
   getSessionTTL,
 } from '@/lib/session/firestoreSessionStore';
-
-// Use consistent cookie name across the app
-export const SESSION_COOKIE_NAME = '__session';
+import { SESSION_COOKIE_NAME } from '@/lib/session/constants';
 
 // POST - Set auth session cookie (HttpOnly, Secure)
 // Requires Firebase ID token in Authorization header

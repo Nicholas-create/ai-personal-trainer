@@ -84,19 +84,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthChange(async (fbUser) => {
-      setFirebaseUser(fbUser);
+      try {
+        setFirebaseUser(fbUser);
 
-      if (fbUser) {
-        // Get fresh ID token and set auth cookie for middleware detection
-        const idToken = await fbUser.getIdToken();
-        await setAuthCookie(idToken);
-        await loadUser(fbUser);
-      } else {
-        await clearAuthCookie();
+        if (fbUser) {
+          // Get fresh ID token and set auth cookie for middleware detection
+          const idToken = await fbUser.getIdToken();
+          const cookieSet = await setAuthCookie(idToken);
+          if (!cookieSet) {
+            // Cookie failed but we can still continue with client-side auth
+            console.warn('Failed to set auth cookie, continuing with client-side auth only');
+          }
+          await loadUser(fbUser);
+        } else {
+          await clearAuthCookie();
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Auth state change error:', error);
+        // On error, clear user state to prevent stale data
         setUser(null);
+      } finally {
+        // Always set loading to false, even on error
+        setLoading(false);
       }
-
-      setLoading(false);
     });
 
     return () => unsubscribe();
