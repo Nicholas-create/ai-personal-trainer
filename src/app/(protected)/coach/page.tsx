@@ -17,6 +17,7 @@ import { useChatSession } from '@/hooks/useChatSession';
 import type { DaySchedule, PlanExercise } from '@/types/plan';
 import type { LibraryExercise, NewExercise, ExerciseFilters, MuscleGroup, EquipmentType, DifficultyLevel } from '@/types/exercise';
 import { ConfirmPauseModal } from '@/components/ui/ConfirmPauseModal';
+import { ConfirmWorkoutChangeModal } from '@/components/ui/ConfirmWorkoutChangeModal';
 import { ChatHistoryDrawer } from '@/components/chat/ChatHistoryDrawer';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { MessageList, type Message } from '@/components/chat/MessageList';
@@ -60,6 +61,22 @@ export default function CoachPage() {
     deleteSession,
   } = useChatSession({ userId: user?.uid });
 
+  // Local state
+  const [loading, setLoading] = useState(false);
+  const [exerciseLibrary, setExerciseLibrary] = useState<LibraryExercise[]>([]);
+  const [exerciseLibraryHash, setExerciseLibraryHash] = useState<string | null>(null);
+  const [showPauseConfirmation, setShowPauseConfirmation] = useState(false);
+  const [pendingPlanData, setPendingPlanData] = useState<DaySchedule[] | null>(null);
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+  // Pending workout changes state (for confirmation modal)
+  const [pendingToolActions, setPendingToolActions] = useState<ToolAction[]>([]);
+  const [pendingUserMessage, setPendingUserMessage] = useState<string>('');
+  const [pendingAssistantMessage, setPendingAssistantMessage] = useState<string>('');
+  const [showWorkoutConfirmation, setShowWorkoutConfirmation] = useState(false);
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
+  // Track if library was modified since last API call to force full resend
+  const libraryModifiedRef = useRef(false);
+
   // Welcome message for new sessions
   const welcomeMessage: Message = useMemo(() => ({
     id: 'welcome',
@@ -68,6 +85,7 @@ export default function CoachPage() {
   }), [user?.displayName, user?.profile?.goals]);
 
   // Always prepend welcome message to display (it's not persisted)
+  // Also append optimistic messages for pending confirmations
   const messages: Message[] = useMemo(() => {
     const mappedMessages = persistedMessages.map((m) => ({
       id: m.id,
@@ -75,17 +93,8 @@ export default function CoachPage() {
       content: m.content,
       planUpdated: m.planUpdated,
     }));
-    return [welcomeMessage, ...mappedMessages];
-  }, [persistedMessages, welcomeMessage]);
-
-  const [loading, setLoading] = useState(false);
-  const [exerciseLibrary, setExerciseLibrary] = useState<LibraryExercise[]>([]);
-  const [exerciseLibraryHash, setExerciseLibraryHash] = useState<string | null>(null);
-  const [showPauseConfirmation, setShowPauseConfirmation] = useState(false);
-  const [pendingPlanData, setPendingPlanData] = useState<DaySchedule[] | null>(null);
-  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
-  // Track if library was modified since last API call to force full resend
-  const libraryModifiedRef = useRef(false);
+    return [welcomeMessage, ...mappedMessages, ...optimisticMessages];
+  }, [persistedMessages, welcomeMessage, optimisticMessages]);
 
   // Load active plan and exercise library on mount
   useEffect(() => {
@@ -283,6 +292,7 @@ export default function CoachPage() {
       }
 
       const data = await response.json();
+      const assistantMessage = data.message || "I've processed your request.";
 
       // Store the new hash from server and clear modified flag
       if (data.exerciseLibraryHash) {
@@ -290,13 +300,37 @@ export default function CoachPage() {
         libraryModifiedRef.current = false;
       }
 
-      // Handle tool actions (save to Firestore)
-      const planUpdated = await handleToolActions(data.toolActions || []);
+      // Check if there are write actions that need confirmation
+      const writeActions = (data.toolActions || []).filter((a: ToolAction) =>
+        ['save_workout_plan', 'update_day_schedule', 'update_exercise', 'add_exercise_to_library'].includes(a.tool)
+      );
 
-      // Persist both messages to Firestore
-      await persistMessages(userContent, data.message, planUpdated);
+      if (writeActions.length > 0) {
+        // Show messages optimistically in UI so user can see what AI proposed
+        setOptimisticMessages([
+          { id: 'pending-user', role: 'user', content: userContent },
+          { id: 'pending-assistant', role: 'assistant', content: assistantMessage },
+        ]);
+
+        // Store pending actions and show confirmation modal
+        setPendingToolActions(data.toolActions || []);
+        setPendingUserMessage(userContent);
+        setPendingAssistantMessage(assistantMessage);
+        setShowWorkoutConfirmation(true);
+        setLoading(false);
+        return; // Don't persist to Firestore yet - wait for confirmation
+      }
+
+      // No write actions, proceed normally
+      await handleToolActions(data.toolActions || []);
+      await persistMessages(userContent, assistantMessage, false);
     } catch (error) {
       logger.error('Chat error:', error);
+      logger.error('Error details:', {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorResponse = errorMessage.includes('authenticated')
         ? 'Your session has expired. Please refresh the page and try again.'
@@ -349,6 +383,39 @@ export default function CoachPage() {
     );
   };
 
+  // Handle confirmation of workout changes
+  const handleConfirmWorkoutChanges = async () => {
+    setLoading(true);
+    try {
+      const planUpdated = await handleToolActions(pendingToolActions);
+      await persistMessages(pendingUserMessage, pendingAssistantMessage, planUpdated);
+    } catch (error) {
+      logger.error('Error saving workout changes:', error);
+    } finally {
+      setLoading(false);
+      setShowWorkoutConfirmation(false);
+      setOptimisticMessages([]); // Clear optimistic - now persisted
+      setPendingToolActions([]);
+      setPendingUserMessage('');
+      setPendingAssistantMessage('');
+    }
+  };
+
+  // Handle cancellation of workout changes
+  const handleCancelWorkoutChanges = async () => {
+    setShowWorkoutConfirmation(false);
+    // Persist the conversation but note changes were cancelled
+    await persistMessages(
+      pendingUserMessage,
+      pendingAssistantMessage + '\n\n*Changes were not saved.*',
+      false
+    );
+    setOptimisticMessages([]); // Clear optimistic - now persisted
+    setPendingToolActions([]);
+    setPendingUserMessage('');
+    setPendingAssistantMessage('');
+  };
+
   return (
     <div className="h-[calc(100vh-6rem)] lg:h-screen flex flex-col lg:flex-row">
       {/* Main Chat Area */}
@@ -358,6 +425,7 @@ export default function CoachPage() {
           loading={loading || sessionLoading}
           onNewChat={startNewChat}
           onOpenHistory={() => setShowHistoryDrawer(true)}
+          messages={messages}
         />
 
         <MessageList
@@ -397,6 +465,14 @@ export default function CoachPage() {
         onCancel={handleCancelCreatePlan}
         currentProgramName={activePlan?.name || 'current program'}
         loading={loading || isCreatingPlan}
+      />
+
+      <ConfirmWorkoutChangeModal
+        isOpen={showWorkoutConfirmation}
+        onConfirm={handleConfirmWorkoutChanges}
+        onCancel={handleCancelWorkoutChanges}
+        toolActions={pendingToolActions}
+        loading={loading}
       />
 
       <ChatHistoryDrawer

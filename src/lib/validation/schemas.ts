@@ -39,7 +39,9 @@ const workoutTypeSchema = z.enum([
   'upper_body',
   'lower_body',
   'full_body',
+  'core',
   'cardio',
+  'flexibility',
   'rest',
 ]);
 

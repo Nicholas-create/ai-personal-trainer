@@ -10,7 +10,7 @@ export type PlanStatus = 'active' | 'paused' | 'archived' | 'expired';
 
 export interface DaySchedule {
   dayOfWeek: string;
-  workoutType: 'upper_body' | 'lower_body' | 'full_body' | 'cardio' | 'rest';
+  workoutType: 'upper_body' | 'lower_body' | 'full_body' | 'core' | 'cardio' | 'flexibility' | 'rest';
   workoutName: string;
   exercises: PlanExercise[];
 }

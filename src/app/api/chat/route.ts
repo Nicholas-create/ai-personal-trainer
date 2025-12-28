@@ -35,7 +35,7 @@ const tools: Anthropic.Tool[] = [
               },
               workoutType: {
                 type: 'string',
-                enum: ['upper_body', 'lower_body', 'full_body', 'cardio', 'rest'],
+                enum: ['upper_body', 'lower_body', 'full_body', 'core', 'cardio', 'flexibility', 'rest'],
               },
               workoutName: { type: 'string' },
               exercises: {
@@ -83,7 +83,7 @@ const tools: Anthropic.Tool[] = [
         },
         workoutType: {
           type: 'string',
-          enum: ['upper_body', 'lower_body', 'full_body', 'cardio', 'rest'],
+          enum: ['upper_body', 'lower_body', 'full_body', 'core', 'cardio', 'flexibility', 'rest'],
           description: 'The type of workout',
         },
         workoutName: {
@@ -453,6 +453,15 @@ function buildSystemPrompt(
   activePlan: DaySchedule[] | null,
   exerciseLibrary?: ExerciseLibrarySummary | null
 ): string {
+  // Add current date information so the AI knows what day it is
+  const now = new Date();
+  const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long' });
+  const fullDate = now.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
   const planContext = activePlan
     ? `Current Active Plan:\n${JSON.stringify(activePlan, null, 2)}`
     : 'No active plan - user needs a workout program created.';
@@ -478,6 +487,9 @@ User Context:
 - Experience Level: ${userContext?.experienceLevel || 'Not specified'}
 - Preferred Workout Days: ${userContext?.workoutDays?.join(', ') || 'Not specified'}
 - Session Length: ${userContext?.sessionLength || 45} minutes
+
+Current Date: ${dayOfWeek}, ${fullDate}
+(When the user says "today", "tomorrow", or asks about specific days, use this information.)
 
 ${planContext}
 
@@ -534,6 +546,32 @@ You have access to workout management tools that save directly to the user's acc
 - For exercises, PREFER ones from the user's library. Use query_exercise_library first to find suitable exercises.
 - If suggesting a new exercise not in their library, offer to add it using add_exercise_to_library
 - When the user asks about exercise form or how to do an exercise, use get_exercise_details to look it up`;
+}
+
+// Retry helper for API calls that may fail transiently
+async function callWithRetry<T>(
+  fn: () => Promise<T>,
+  options: { maxRetries?: number; baseDelay?: number } = {}
+): Promise<T> {
+  const { maxRetries = 2, baseDelay = 1000 } = options;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < maxRetries) {
+        const delay = baseDelay * (attempt + 1); // Simple linear backoff
+        logger.warn(`API call attempt ${attempt + 1} failed, retrying in ${delay}ms...`, {
+          error: lastError.message,
+        });
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
 }
 
 async function handleChatRequest(
@@ -602,25 +640,48 @@ async function handleChatRequest(
     let assistantMessage = '';
     const toolActions: ToolAction[] = [];
 
+    // Extract initial text/tool_use from first response
     for (const block of response.content) {
       if (block.type === 'text') {
         assistantMessage += block.text;
       } else if (block.type === 'tool_use') {
-        toolActions.push({
-          tool: block.name,
-          data: block.input,
-        });
+        // Only collect write tools (not query tools) for client execution
+        if (!QUERY_TOOLS.includes(block.name)) {
+          toolActions.push({
+            tool: block.name,
+            data: block.input,
+          });
+        }
       }
     }
 
-    // If tools were called but no text response, continue conversation
-    if (!assistantMessage && response.stop_reason === 'tool_use') {
-      // Build tool results - execute query tools server-side, mark others as needing client execution
-      const toolResultBlocks: Anthropic.ToolResultBlockParam[] = response.content
+    // Handle tool continuation - may need multiple rounds
+    let currentResponse = response;
+    let iterationCount = 0;
+    const MAX_TOOL_ITERATIONS = 5;
+
+    // Accumulate conversation history across iterations
+    type MessageParam = {
+      role: 'user' | 'assistant';
+      content: Anthropic.ContentBlock[] | Anthropic.ToolResultBlockParam[] | string;
+    };
+    const conversationHistory: MessageParam[] = messages.map(
+      (m: { role: string; content: string }) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })
+    );
+
+    while (currentResponse.stop_reason === 'tool_use' && iterationCount < MAX_TOOL_ITERATIONS) {
+      iterationCount++;
+      logger.log(`Tool continuation round ${iterationCount}`);
+
+      // Build tool results for this round
+      const toolResultBlocks: Anthropic.ToolResultBlockParam[] = currentResponse.content
         .filter((block): block is Anthropic.ToolUseBlock => block.type === 'tool_use')
         .map((block) => {
-          // Execute query tools server-side with real results
           if (QUERY_TOOLS.includes(block.name)) {
+            // Execute query tools server-side
             const result = executeQueryTool(
               block.name,
               block.input as Record<string, unknown>,
@@ -632,8 +693,7 @@ async function handleChatRequest(
               content: result,
             };
           }
-
-          // Write tools will be executed client-side
+          // Write tools - mark as saved (client will execute)
           return {
             type: 'tool_result' as const,
             tool_use_id: block.id,
@@ -641,32 +701,54 @@ async function handleChatRequest(
           };
         });
 
-      const continuedResponse = await anthropic.messages.create({
-        model: MODEL_CONFIG.chatContinuation.model,
-        max_tokens: MODEL_CONFIG.chatContinuation.maxTokens,
-        system: systemPrompt,
-        tools,
-        messages: [
-          ...messages.map((m: { role: string; content: string }) => ({
-            role: m.role as 'user' | 'assistant',
-            content: m.content,
-          })),
-          {
-            role: 'assistant' as const,
-            content: response.content,
-          },
-          {
-            role: 'user' as const,
-            content: toolResultBlocks,
-          },
-        ],
+      // Add this exchange to history (accumulates across iterations)
+      conversationHistory.push({
+        role: 'assistant' as const,
+        content: currentResponse.content,
+      });
+      conversationHistory.push({
+        role: 'user' as const,
+        content: toolResultBlocks,
       });
 
-      for (const block of continuedResponse.content) {
-        if (block.type === 'text') {
-          assistantMessage += block.text;
+      try {
+        currentResponse = await callWithRetry(
+          () =>
+            anthropic.messages.create({
+              model: MODEL_CONFIG.chatContinuation.model,
+              max_tokens: MODEL_CONFIG.chatContinuation.maxTokens,
+              system: systemPrompt,
+              tools,
+              messages: conversationHistory,
+            }),
+          { maxRetries: 2, baseDelay: 1000 }
+        );
+
+        // Extract text and tool_use from this round
+        for (const block of currentResponse.content) {
+          if (block.type === 'text') {
+            assistantMessage += block.text;
+          } else if (block.type === 'tool_use') {
+            // Collect write tools from continuation rounds too
+            if (!QUERY_TOOLS.includes(block.name)) {
+              toolActions.push({
+                tool: block.name,
+                data: block.input,
+              });
+            }
+          }
         }
+      } catch (continuationError) {
+        logger.error(`Tool continuation failed at round ${iterationCount}:`, continuationError);
+        if (!assistantMessage) {
+          assistantMessage = 'I had trouble processing your request. Please try again.';
+        }
+        break;
       }
+    }
+
+    if (iterationCount >= MAX_TOOL_ITERATIONS) {
+      logger.warn('Max tool iterations reached');
     }
 
     const jsonResponse = NextResponse.json({

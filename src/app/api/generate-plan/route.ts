@@ -24,7 +24,7 @@ const generatePlanTool: Anthropic.Tool = {
             },
             workoutType: {
               type: 'string',
-              enum: ['upper_body', 'lower_body', 'full_body', 'cardio', 'rest'],
+              enum: ['upper_body', 'lower_body', 'full_body', 'core', 'cardio', 'flexibility', 'rest'],
             },
             workoutName: { type: 'string' },
             exercises: {
@@ -93,7 +93,7 @@ Guidelines:
 3. For rest days, use workoutType: "rest" and empty exercises array
 4. Consider user limitations when selecting exercises
 5. Include 4-6 exercises per workout day
-6. Vary workout types: upper_body, lower_body, full_body, cardio, rest
+6. Vary workout types: upper_body, lower_body, full_body, core, cardio, flexibility, rest
 7. Include warm-up exercises
 8. Keep exercises appropriate for 60+ users (safe, effective)
 9. Generate unique IDs for exercises (e.g., "ex-mon-1", "ex-tue-1")
