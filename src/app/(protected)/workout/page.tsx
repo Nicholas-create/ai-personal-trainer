@@ -59,7 +59,13 @@ export default function WorkoutPage() {
             setWorkoutName(todaySchedule.workoutName || 'Workout');
 
             // Check if a workout for today already exists
-            const existingWorkout = await getTodayWorkout(user.uid, activePlan.id);
+            // Wrap in try-catch in case Firestore index is missing
+            let existingWorkout = null;
+            try {
+              existingWorkout = await getTodayWorkout(user.uid, activePlan.id);
+            } catch (queryErr) {
+              logger.warn('Could not check for existing workout, treating as new:', queryErr);
+            }
 
             if (existingWorkout && Array.isArray(existingWorkout.exercises) && existingWorkout.exercises.length > 0) {
               // Resume existing workout - validate exercise data
