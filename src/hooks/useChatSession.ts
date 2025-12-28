@@ -13,51 +13,6 @@ import { withRetry } from '@/lib/firebase/firestoreRetry';
 import { logger } from '@/lib/logger';
 import type { ChatSession, ChatMessage, NewChatMessage } from '@/types/chat';
 
-// Key for storing session IDs created in this browser session
-const BROWSER_SESSION_KEY = 'coach_chat_session_ids';
-
-/**
- * Get session IDs from sessionStorage (browser session only)
- */
-function getBrowserSessionIds(): string[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const stored = sessionStorage.getItem(BROWSER_SESSION_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Add a session ID to sessionStorage
- */
-function addBrowserSessionId(sessionId: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const current = getBrowserSessionIds();
-    if (!current.includes(sessionId)) {
-      sessionStorage.setItem(BROWSER_SESSION_KEY, JSON.stringify([...current, sessionId]));
-    }
-  } catch {
-    // Ignore storage errors
-  }
-}
-
-/**
- * Remove a session ID from sessionStorage
- */
-function removeBrowserSessionId(sessionId: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const current = getBrowserSessionIds();
-    const updated = current.filter(id => id !== sessionId);
-    sessionStorage.setItem(BROWSER_SESSION_KEY, JSON.stringify(updated));
-  } catch {
-    // Ignore storage errors
-  }
-}
-
 interface UseChatSessionProps {
   userId: string | undefined;
 }
@@ -98,8 +53,8 @@ export function useChatSession({
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * Load the active session and its messages on mount
-   * Only loads sessions that were created in this browser session
+   * Initialize on mount - always start with a fresh chat
+   * Users can load previous sessions from the sidebar
    */
   const loadActiveSession = useCallback(async () => {
     if (!userId) {
@@ -107,54 +62,23 @@ export function useChatSession({
       return;
     }
 
-    try {
-      setLoading(true);
-      setError(null);
-
-      const browserSessionIds = getBrowserSessionIds();
-      const session = await withRetry(() => getActiveChatSession(userId));
-
-      // Only load if this session was created in the current browser session
-      if (session && browserSessionIds.includes(session.id)) {
-        setCurrentSession(session);
-        const sessionMessages = await withRetry(() =>
-          getChatMessages(userId, session.id)
-        );
-        setMessages(sessionMessages);
-      } else {
-        // No active session in this browser session - start fresh
-        setCurrentSession(null);
-        setMessages([]);
-      }
-    } catch (err) {
-      logger.error('Error loading active session:', err);
-      setError('Failed to load chat history.');
-    } finally {
-      setLoading(false);
-    }
+    // Always start fresh - no active session
+    setCurrentSession(null);
+    setMessages([]);
+    setLoading(false);
   }, [userId]);
 
   /**
    * Load the list of sessions for the sidebar
-   * Only shows sessions created in this browser session
+   * Shows all sessions from Firestore (persists across browsers)
    */
   const refreshSessions = useCallback(async () => {
     if (!userId) return;
 
     try {
       setSessionsLoading(true);
-      const browserSessionIds = getBrowserSessionIds();
-
-      // If no sessions in this browser session, show empty list
-      if (browserSessionIds.length === 0) {
-        setSessions([]);
-        return;
-      }
-
       const allSessions = await withRetry(() => getChatSessions(userId, 50));
-      // Filter to only sessions created in this browser session
-      const browserSessions = allSessions.filter(s => browserSessionIds.includes(s.id));
-      setSessions(browserSessions);
+      setSessions(allSessions);
     } catch (err) {
       logger.error('Error loading sessions:', err);
     } finally {
@@ -200,9 +124,6 @@ export function useChatSession({
               : userContent;
 
           sessionId = await withRetry(() => createChatSession(userId, title));
-
-          // Add to browser session storage so it persists within this browser session
-          addBrowserSessionId(sessionId);
 
           // Reload the new session
           const newSession = await withRetry(() => getActiveChatSession(userId));
@@ -330,9 +251,6 @@ export function useChatSession({
         setError(null);
 
         await withRetry(() => deleteChatSession(userId, sessionId));
-
-        // Remove from browser session storage
-        removeBrowserSessionId(sessionId);
 
         // If we deleted the current session, reset to welcome state
         if (currentSession?.id === sessionId) {
