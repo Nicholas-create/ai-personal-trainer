@@ -47,20 +47,37 @@ export default function WorkoutPage() {
           );
 
           if (todaySchedule && todaySchedule.workoutType !== 'rest') {
-            setTodayExercises(todaySchedule.exercises);
-            setWorkoutName(todaySchedule.workoutName);
+            // Ensure exercises array exists
+            const scheduleExercises = Array.isArray(todaySchedule.exercises) ? todaySchedule.exercises : [];
+            if (scheduleExercises.length === 0) {
+              // No exercises defined for today - treat as rest day
+              setLoading(false);
+              return;
+            }
+
+            setTodayExercises(scheduleExercises);
+            setWorkoutName(todaySchedule.workoutName || 'Workout');
 
             // Check if a workout for today already exists
             const existingWorkout = await getTodayWorkout(user.uid, activePlan.id);
 
-            if (existingWorkout) {
-              // Resume existing workout
-              setExercises(existingWorkout.exercises);
+            if (existingWorkout && Array.isArray(existingWorkout.exercises) && existingWorkout.exercises.length > 0) {
+              // Resume existing workout - validate exercise data
+              const validatedExercises = existingWorkout.exercises.map((e, index) => ({
+                ...e,
+                id: e.id || `exercise-${index}`,
+                name: e.name || 'Unknown Exercise',
+                targetSets: typeof e.targetSets === 'number' && e.targetSets > 0 ? e.targetSets : 1,
+                targetReps: typeof e.targetReps === 'number' && e.targetReps > 0 ? e.targetReps : 10,
+                completedSets: Array.isArray(e.completedSets) ? e.completedSets : [],
+                skipped: e.skipped || false,
+              }));
+              setExercises(validatedExercises);
               setWorkoutId(existingWorkout.id);
             } else {
               // Initialize exercise tracking for new workout
               // Add defensive defaults for AI-generated data that may have missing fields
-              const initialExercises: Exercise[] = todaySchedule.exercises.map(
+              const initialExercises: Exercise[] = scheduleExercises.map(
                 (e, index) => {
                   const sets = typeof e.sets === 'number' && e.sets > 0 ? e.sets : 1;
                   const reps = typeof e.reps === 'number' && e.reps > 0 ? e.reps : 10;
