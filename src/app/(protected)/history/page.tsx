@@ -2,19 +2,9 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import {
-  getWorkouts,
-  getAllPlans,
-  renamePlan,
-  pausePlan,
-  resumePlan,
-  archivePlan,
-  extendPlan,
-  deletePlan,
-} from '@/lib/firebase/firestore';
+import { getWorkouts, getAllPlans } from '@/lib/firebase/firestore';
 import type { Workout } from '@/types/workout';
 import type { WorkoutPlan, DaySchedule } from '@/types/plan';
-import { ProgramDetail } from '@/components/programs';
 import {
   format,
   startOfMonth,
@@ -35,7 +25,6 @@ export default function HistoryPage() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [loading, setLoading] = useState(true);
-  const [showProgramManagement, setShowProgramManagement] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -96,50 +85,12 @@ export default function HistoryPage() {
     );
   };
 
-  const activePlan = plans.find((p) => p.status === 'active');
   const selectedWorkout = getWorkoutForDay(selectedDate);
   const selectedSchedule = getScheduledWorkoutForDate(selectedDate);
 
   const days = getDaysInMonth();
   const startDayOfWeek = getDay(startOfMonth(currentMonth));
   const adjustedStartDay = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
-
-  // Program action handlers (use activePlan)
-  const handleRename = async (name: string) => {
-    if (!user || !activePlan) return;
-    await renamePlan(user.uid, activePlan.id, name);
-    await loadData();
-  };
-
-  const handlePause = async () => {
-    if (!user || !activePlan) return;
-    await pausePlan(user.uid, activePlan.id);
-    await loadData();
-  };
-
-  const handleResume = async () => {
-    if (!user || !activePlan) return;
-    await resumePlan(user.uid, activePlan.id);
-    await loadData();
-  };
-
-  const handleArchive = async () => {
-    if (!user || !activePlan) return;
-    await archivePlan(user.uid, activePlan.id);
-    await loadData();
-  };
-
-  const handleExtend = async (weeks: number) => {
-    if (!user || !activePlan) return;
-    await extendPlan(user.uid, activePlan.id, weeks);
-    await loadData();
-  };
-
-  const handleDelete = async () => {
-    if (!user || !activePlan) return;
-    await deletePlan(user.uid, activePlan.id);
-    await loadData();
-  };
 
   if (loading) {
     return (
@@ -424,49 +375,6 @@ export default function HistoryPage() {
             })()}
           </div>
 
-          {/* Active Program Management (Collapsible) */}
-          {activePlan && (
-            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-              <button
-                onClick={() => setShowProgramManagement(!showProgramManagement)}
-                className="w-full p-4 flex items-center justify-between text-left"
-              >
-                <div>
-                  <h3 className="font-semibold text-gray-900">Active Program</h3>
-                  <p className="text-sm text-gray-500">{activePlan.name}</p>
-                </div>
-                <svg
-                  className={`w-5 h-5 text-gray-400 transition-transform ${
-                    showProgramManagement ? 'rotate-180' : ''
-                  }`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
-
-              {showProgramManagement && (
-                <div className="border-t border-gray-100">
-                  <ProgramDetail
-                    plan={activePlan}
-                    onRename={handleRename}
-                    onPause={handlePause}
-                    onResume={handleResume}
-                    onArchive={handleArchive}
-                    onExtend={handleExtend}
-                    onDelete={handleDelete}
-                  />
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>
