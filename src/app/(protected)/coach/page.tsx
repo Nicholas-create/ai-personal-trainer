@@ -30,6 +30,35 @@ interface ToolAction {
   data: unknown;
 }
 
+// Sanitize exercises from AI-generated data to ensure required fields exist
+function sanitizeExercises(exercises: unknown[]): PlanExercise[] {
+  if (!Array.isArray(exercises)) return [];
+
+  return exercises
+    .filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object')
+    .map((e, index) => ({
+      id: typeof e.id === 'string' && e.id ? e.id : `exercise-${index}-${Date.now()}`,
+      name: typeof e.name === 'string' && e.name ? e.name : 'Unknown Exercise',
+      sets: typeof e.sets === 'number' && e.sets > 0 ? Math.round(e.sets) : 3,
+      reps: typeof e.reps === 'number' && e.reps > 0 ? Math.round(e.reps) : 10,
+      notes: typeof e.notes === 'string' ? e.notes : undefined,
+    }));
+}
+
+// Sanitize workout schedule from AI-generated data
+function sanitizeWorkoutSchedule(schedule: unknown[]): DaySchedule[] {
+  if (!Array.isArray(schedule)) return [];
+
+  return schedule
+    .filter((d): d is Record<string, unknown> => d !== null && typeof d === 'object')
+    .map((d) => ({
+      dayOfWeek: typeof d.dayOfWeek === 'string' ? d.dayOfWeek : 'monday',
+      workoutType: (typeof d.workoutType === 'string' ? d.workoutType : 'rest') as DaySchedule['workoutType'],
+      workoutName: typeof d.workoutName === 'string' ? d.workoutName : 'Rest Day',
+      exercises: sanitizeExercises(Array.isArray(d.exercises) ? d.exercises : []),
+    }));
+}
+
 const QUICK_ACTIONS = [
   { label: 'Modify today\'s workout', prompt: 'I need to modify today\'s workout. What are my options?' },
   { label: 'Show alternatives', prompt: 'Can you show me alternative exercises for my current workout?' },
@@ -145,34 +174,38 @@ export default function CoachPage() {
       try {
         switch (action.tool) {
           case 'save_workout_plan': {
-            const { workoutSchedule } = action.data as { workoutSchedule: DaySchedule[] };
+            const rawData = action.data as { workoutSchedule: unknown[] };
+            // Sanitize the entire workout schedule to ensure required fields exist
+            const sanitizedSchedule = sanitizeWorkoutSchedule(rawData.workoutSchedule || []);
 
             // If there's an active plan, show confirmation before creating new one
             if (activePlan) {
-              setPendingPlanData(workoutSchedule);
+              setPendingPlanData(sanitizedSchedule);
               setShowPauseConfirmation(true);
               // Don't mark as updated yet - will be handled by confirmation
               return false;
             }
 
             // No active plan, create directly using the hook
-            const success = await createNewPlan(workoutSchedule);
+            const success = await createNewPlan(sanitizedSchedule);
             planUpdated = success;
             break;
           }
 
           case 'update_day_schedule': {
             if (!activePlan) break;
-            const { dayOfWeek, workoutType, workoutName, exercises } = action.data as {
+            const rawData = action.data as {
               dayOfWeek: string;
               workoutType: string;
               workoutName: string;
-              exercises: PlanExercise[];
+              exercises: unknown[];
             };
-            await updateDayInPlan(user.uid, activePlan.id, dayOfWeek, {
-              workoutType,
-              workoutName,
-              exercises,
+            // Sanitize exercises to ensure required fields exist
+            const sanitizedExercises = sanitizeExercises(rawData.exercises || []);
+            await updateDayInPlan(user.uid, activePlan.id, rawData.dayOfWeek, {
+              workoutType: rawData.workoutType,
+              workoutName: rawData.workoutName,
+              exercises: sanitizedExercises,
             });
             // Reload the active plan
             const updatedPlan = await getActivePlan(user.uid);

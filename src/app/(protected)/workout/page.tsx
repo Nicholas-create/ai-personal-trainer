@@ -11,6 +11,11 @@ import { format } from 'date-fns';
 import { logger } from '@/lib/logger';
 import Stepper from '@/components/ui/Stepper';
 import WeightChips from '@/components/ui/WeightChips';
+import {
+  ExclamationTriangleIcon,
+  CalendarDaysIcon,
+  CheckIcon,
+} from '@heroicons/react/24/outline';
 
 export default function WorkoutPage() {
   const { user } = useAuth();
@@ -54,22 +59,27 @@ export default function WorkoutPage() {
               setWorkoutId(existingWorkout.id);
             } else {
               // Initialize exercise tracking for new workout
+              // Add defensive defaults for AI-generated data that may have missing fields
               const initialExercises: Exercise[] = todaySchedule.exercises.map(
-                (e) => ({
-                  id: e.id,
-                  name: e.name,
-                  targetSets: e.sets,
-                  targetReps: e.reps,
-                  completedSets: Array(e.sets)
-                    .fill(null)
-                    .map(() => ({
-                      reps: e.reps,
-                      weight: 0,
-                      completed: false,
-                    })),
-                  skipped: false,
-                  notes: e.notes,
-                })
+                (e, index) => {
+                  const sets = typeof e.sets === 'number' && e.sets > 0 ? e.sets : 1;
+                  const reps = typeof e.reps === 'number' && e.reps > 0 ? e.reps : 10;
+                  return {
+                    id: e.id || `${e.name || 'exercise'}-${index}`,
+                    name: e.name || 'Unknown Exercise',
+                    targetSets: sets,
+                    targetReps: reps,
+                    completedSets: Array(sets)
+                      .fill(null)
+                      .map(() => ({
+                        reps: reps,
+                        weight: 0,
+                        completed: false,
+                      })),
+                    skipped: false,
+                    notes: e.notes,
+                  };
+                }
               );
               setExercises(initialExercises);
 
@@ -205,7 +215,7 @@ export default function WorkoutPage() {
     return (
       <div className="p-6 lg:p-8 max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
-          <span className="text-6xl mb-4 block">⚠️</span>
+          <ExclamationTriangleIcon className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">
             Something went wrong
           </h2>
@@ -225,7 +235,7 @@ export default function WorkoutPage() {
     return (
       <div className="p-6 lg:p-8 max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
-          <span className="text-6xl mb-4 block">📅</span>
+          <CalendarDaysIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">
             No Workout Scheduled
           </h2>
@@ -277,7 +287,7 @@ export default function WorkoutPage() {
       {saveError && (
         <div className="bg-yellow-50 border-b border-yellow-200 p-3">
           <div className="max-w-4xl mx-auto flex items-center gap-2 text-yellow-800 text-sm">
-            <span>⚠️</span>
+            <ExclamationTriangleIcon className="w-4 h-4 flex-shrink-0" />
             <span>{saveError}</span>
             <button
               onClick={() => setSaveError(null)}
@@ -323,7 +333,7 @@ export default function WorkoutPage() {
                             : 'bg-gray-300 text-gray-600'
                         }`}
                       >
-                        {isComplete ? '✓' : index + 1}
+                        {isComplete ? <CheckIcon className="w-4 h-4" /> : index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold truncate">{exercise.name}</p>
@@ -411,7 +421,7 @@ export default function WorkoutPage() {
                               : 'bg-blue-600 text-white hover:bg-blue-700'
                           } disabled:opacity-50`}
                         >
-                          {set.completed ? '✓ Done' : 'Complete Set'}
+                          {set.completed ? <><CheckIcon className="w-4 h-4 inline mr-1" /> Done</> : 'Complete Set'}
                         </button>
                       </div>
                     </div>
