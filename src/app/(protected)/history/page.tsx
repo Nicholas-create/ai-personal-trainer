@@ -290,12 +290,50 @@ export default function HistoryPage() {
                           {selectedWorkout.duration} minutes
                         </span>
                       </div>
-                      <div className="flex justify-between py-2 border-b border-gray-100">
-                        <span className="text-gray-600">Exercises</span>
-                        <span className="font-semibold text-gray-900">
-                          {selectedWorkout.exercises.length} total
-                        </span>
+
+                      <div className="space-y-2 pt-2">
+                        <p className="text-sm font-medium text-gray-500 uppercase tracking-wide">
+                          Exercises ({selectedWorkout.exercises.length})
+                        </p>
+                        {selectedWorkout.exercises.map((exercise) => (
+                          <div
+                            key={exercise.id}
+                            className="py-3 border-b border-gray-100 last:border-0"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-gray-900">
+                                {exercise.name}
+                              </span>
+                              {exercise.skipped && (
+                                <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
+                                  Skipped
+                                </span>
+                              )}
+                            </div>
+                            {exercise.skipped ? (
+                              <p className="text-sm text-gray-500">
+                                {exercise.skipReason || 'No reason provided'}
+                              </p>
+                            ) : (
+                              <div className="space-y-1">
+                                {exercise.completedSets.map((set, index) => (
+                                  <div
+                                    key={index}
+                                    className="flex items-center text-sm text-gray-600"
+                                  >
+                                    <span className="w-14">Set {index + 1}:</span>
+                                    <span>
+                                      {set.reps} reps
+                                      {set.weight > 0 && ` @ ${set.weight} lbs`}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
+
                       {selectedWorkout.notes && (
                         <div className="py-2">
                           <span className="text-gray-600 block mb-1">Notes</span>
